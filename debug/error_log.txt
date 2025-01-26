@@ -1,0 +1,8 @@
+
+[2025-01-26 17:27:52] Exception: Failed to fetch data for TSLA: name 'get_this_friday' is not defined
+Stack trace:
+Traceback (most recent call last):
+  File "/Users/reevefrancis/repos/options_visualizer/app.py", line 44, in get_option_chain
+    friday = get_this_friday()
+NameError: name 'get_this_friday' is not defined
+
