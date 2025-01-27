@@ -1,33 +1,31 @@
-// Initialize services
-const api = new ApiService();
-const dataService = new DataService();
-const statusMessage = new StatusMessage('statusMessage');
+// Initialize the options table
+const optionsTable = new OptionsTable('optionsTable');
 
-// Initialize views
-const tableView = new TableView('table-view');
-const surfaceView = new SurfaceView('surface-view');
-const greeksView = new GreeksView('greeks-view');
-
-// Handle navigation
-document.querySelectorAll('.main-nav a').forEach(link => {
-    link.addEventListener('click', (e) => {
-        e.preventDefault();
-        const pageId = e.target.dataset.page;
-        switchPage(pageId);
+// Add event listener for keyboard events
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('symbolInput');
+    input.addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            fetchData();
+        }
     });
 });
 
-function switchPage(pageId) {
-    // Hide all pages
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
+async function fetchData() {
+    const symbol = document.getElementById('symbolInput').value.toUpperCase();
     
-    // Show selected page
-    document.getElementById(pageId).classList.add('active');
+    if (!symbol) {
+        document.getElementById('statusMessage').textContent = 'Please enter a symbol';
+        return;
+    }
     
-    // Update nav
-    document.querySelectorAll('.main-nav a').forEach(link => {
-        link.classList.toggle('active', link.dataset.page === pageId);
-    });
+    document.getElementById('statusMessage').textContent = 'Fetching data...';
+    
+    try {
+        await optionsTable.initialize(symbol);
+        document.getElementById('statusMessage').textContent = `Showing options for ${symbol}`;
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('statusMessage').textContent = 'Error: ' + error.message;
+    }
 } 

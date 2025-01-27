@@ -6,3 +6,67 @@ Traceback (most recent call last):
     friday = get_this_friday()
 NameError: name 'get_this_friday' is not defined
 
+
+[2025-01-26 19:29:27] Failed to fetch expiry dates for TSLA: Could not get spot price for TSLA
+Stack trace:
+Traceback (most recent call last):
+  File "/Users/reevefrancis/repos/options_visualizer/app.py", line 85, in get_expiry_dates
+    options_data.fetch_data(symbol)
+  File "/Users/reevefrancis/repos/options_visualizer/python/data/options_data.py", line 23, in fetch_data
+    raise ValueError(f"Could not get spot price for {self.symbol}")
+ValueError: Could not get spot price for TSLA
+
+
+--------------------------------------------------------------------------------
+
+[2025-01-26 19:29:28] Client Error: fetchExpiryDates
+Error: Failed to fetch expiry dates: {
+  "error": "Failed to fetch expiry dates for TSLA: Could not get spot price for TSLA"
+}
+
+Context: {'symbol': 'TSLA'}
+--------------------------------------------------------------------------------
+
+[2025-01-26 19:29:28] Client Error: initialize
+Error: Failed to fetch expiry dates: {
+  "error": "Failed to fetch expiry dates for TSLA: Could not get spot price for TSLA"
+}
+
+Context: {'symbol': 'TSLA'}
+--------------------------------------------------------------------------------
+
+[2025-01-26 19:31:29] Failed to fetch data for TSLA: cannot convert float NaN to integer
+Stack trace:
+Traceback (most recent call last):
+  File "/Users/reevefrancis/repos/options_visualizer/app.py", line 66, in get_option_chain
+    result = options_cache[symbol].get_chain_for_date(expiry_date)
+  File "/Users/reevefrancis/repos/options_visualizer/python/data/options_data.py", line 165, in get_chain_for_date
+    'call_volume': int(chain.sel(strike=strike, option_type='call').volume.item() or 0),
+ValueError: cannot convert float NaN to integer
+
+
+--------------------------------------------------------------------------------
+
+[2025-01-26 19:31:29] Client Error: fetchOptionChain
+Error: HTTP error! status: 500, message: {
+  "error": "Failed to fetch data for TSLA: cannot convert float NaN to integer"
+}
+
+Context: {'symbol': 'TSLA', 'date': '2025-02-07'}
+--------------------------------------------------------------------------------
+
+[2025-01-26 19:31:29] Client Error: fetchAndDisplayData
+Error: HTTP error! status: 500, message: {
+  "error": "Failed to fetch data for TSLA: cannot convert float NaN to integer"
+}
+
+Context: {'symbol': 'TSLA', 'date': '2025-02-07'}
+--------------------------------------------------------------------------------
+
+[2025-01-26 19:31:29] Client Error: initialize
+Error: HTTP error! status: 500, message: {
+  "error": "Failed to fetch data for TSLA: cannot convert float NaN to integer"
+}
+
+Context: {'symbol': 'TSLA'}
+--------------------------------------------------------------------------------

@@ -1,13 +1,15 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
-import yfinance as yf
-import pandas as pd
 import os
 from datetime import datetime, timedelta
 import traceback
+from python.data.options_data import OptionsData
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend', static_url_path='/static')
 CORS(app)
+
+# Global options data cache
+options_cache = {}
 
 def get_this_friday():
     """Get the date of this coming Friday"""
@@ -29,9 +31,11 @@ def log_error(error_msg):
         print(f"Writing error to {os.path.abspath(log_path)}")
         with open(log_path, 'a') as f:
             f.write(f"\n[{timestamp}] {error_msg}")
-            f.write(f"\nStack trace:\n{traceback.format_exc()}\n")
+            if 'Client Error' not in error_msg:  # Only add stack trace for server errors
+                f.write(f"\nStack trace:\n{traceback.format_exc()}\n")
+            f.write("\n" + "-"*80 + "\n")  # Add separator between log entries
         
-        print(f"Error logged successfully")
+        print(f"Error logged to {os.path.abspath(log_path)}: {error_msg}")
     except Exception as e:
         print(f"Failed to log error: {str(e)}")
         print(f"Original error was: {error_msg}")
@@ -43,52 +47,66 @@ def index():
 @app.route('/api/options/<symbol>')
 def get_option_chain(symbol):
     try:
-        print(f"Fetching data for symbol: {symbol}")
         symbol = symbol.strip().upper()
+        expiry_date = request.args.get('date')  # New parameter for expiry date
         
-        # Get this Friday's date
-        friday = get_this_friday()
-        print(f"Getting options for {friday}")
+        if not expiry_date:
+            expiry_date = get_this_friday()  # Use this Friday as default
+            
+        print(f"Fetching options for {symbol} expiring {expiry_date}")
         
-        ticker = yf.Ticker(symbol)
-        chains = ticker.option_chain(friday)
+        # Check if we need to fetch new data
+        if symbol not in options_cache or \
+           (datetime.now() - options_cache[symbol].last_updated).total_seconds() > 300:  # Cache for 5 minutes
+            options_data = OptionsData()
+            options_data.fetch_data(symbol)
+            options_cache[symbol] = options_data
         
-        # Extract just the columns we need
-        calls = pd.DataFrame({
-            'strike': chains.calls['strike'],
-            'call_price': chains.calls['lastPrice']
-        })
+        # Get data for the requested expiry date
+        result = options_cache[symbol].get_chain_for_date(expiry_date)
+        print(f"Found {len(result['options'])} options for {symbol} expiring {expiry_date}")
+        return jsonify(result)
         
-        puts = pd.DataFrame({
-            'strike': chains.puts['strike'],
-            'put_price': chains.puts['lastPrice']
-        })
-        
-        # Merge calls and puts on strike price
-        options = pd.merge(calls, puts, on='strike', how='outer')
-        options = options.fillna(0)  # Fill NaN values with 0
-        options = options.sort_values('strike')
-        
-        # Convert to list of dictionaries
-        options_list = options.to_dict(orient='records')
-        
-        response_data = {
-            'friday_date': friday,
-            'options': options_list
-        }
-        
-        print(f"Found {len(options_list)} options for {symbol}")
-        return jsonify(response_data)
-        
-    except AttributeError as e:
-        error_msg = f'No options data found for {symbol} expiring {friday}'
-        print(f"AttributeError occurred: {error_msg}")
-        log_error(f"AttributeError: {error_msg}\n{str(e)}")
-        return jsonify({'error': error_msg}), 404
     except Exception as e:
         error_msg = f'Failed to fetch data for {symbol}: {str(e)}'
         print(f"Exception occurred: {error_msg}")
-        log_error(f"Exception: {error_msg}")
+        log_error(error_msg)
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/api/expiry_dates/<symbol>')
+def get_expiry_dates(symbol):
+    try:
+        symbol = symbol.strip().upper()
+        
+        # Check if we need to fetch new data
+        if symbol not in options_cache or \
+           (datetime.now() - options_cache[symbol].last_updated).total_seconds() > 300:  # Cache for 5 minutes
+            options_data = OptionsData()
+            options_data.fetch_data(symbol)
+            options_cache[symbol] = options_data
+        
+        dates = options_cache[symbol].get_available_dates()
+        return jsonify({'dates': dates})
+        
+    except Exception as e:
+        error_msg = f'Failed to fetch expiry dates for {symbol}: {str(e)}'
+        log_error(error_msg)
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/api/log', methods=['POST'])
+def log_client_error():
+    try:
+        log_data = request.json
+        error_msg = (
+            f"Client Error: {log_data['method']}\n"
+            f"Error: {log_data['error']}\n"
+            f"Context: {log_data['context']}"
+        )
+        log_error(error_msg)
+        return jsonify({'status': 'logged'}), 200
+    except Exception as e:
+        error_msg = f'Failed to log client error: {str(e)}'
+        log_error(error_msg)
         return jsonify({'error': error_msg}), 500
 
 if __name__ == '__main__':
