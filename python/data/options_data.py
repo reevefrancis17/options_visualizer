@@ -89,9 +89,7 @@ class OptionsData:
         
         processed_df['extrinsic_value'] = self._calculate_extrinsic_value(
             processed_df['mid_price'],
-            processed_df['strike'],
-            self.spot_price,
-            option_type
+            processed_df['intrinsic_value']
         )
         
         return processed_df
@@ -158,10 +156,9 @@ class OptionsData:
         else:  # put
             return np.maximum(strike - spot, 0)
 
-    def _calculate_extrinsic_value(self, price, strike, spot, option_type):
-        """Calculate extrinsic value for options using intrinsic value"""
-        intrinsic = self._calculate_intrinsic_value(strike, spot, option_type)
-        return price - intrinsic
+    def _calculate_extrinsic_value(self, price, intrinsic):
+        """Calculate extrinsic value using mid price and intrinsic value"""
+        return np.maximum(price - intrinsic, 0)
 
     def _create_xarray(self, df):
         """Convert processed dataframe to xarray Dataset"""
@@ -272,7 +269,9 @@ class OptionsData:
                 'call_oi': safe_int(call_data.open_interest.item()),
                 'put_oi': safe_int(put_data.open_interest.item()),
                 'intrinsic_value': safe_float(call_data.intrinsic_value.item()),
-                'extrinsic_value': safe_float(call_data.extrinsic_value.item())
+                'extrinsic_value': safe_float(call_data.extrinsic_value.item()),
+                'put_intrinsic_value': safe_float(put_data.intrinsic_value.item()),
+                'put_extrinsic_value': safe_float(put_data.extrinsic_value.item())
             }
             result['options'].append(option_data)
             
