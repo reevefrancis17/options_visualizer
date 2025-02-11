@@ -77,19 +77,20 @@ class OptionsData:
             pd.to_datetime(expiry_date) - pd.Timestamp.now()
         ).days
         
-        # Calculate mid price
+        # Calculate mid price first
         processed_df['mid_price'] = (processed_df['bid'] + processed_df['ask']) / 2
         
-        # Calculate intrinsic and extrinsic values
+        # Calculate intrinsic value based on spot price
         processed_df['intrinsic_value'] = self._calculate_intrinsic_value(
             processed_df['strike'],
             self.spot_price,
             option_type
         )
         
-        processed_df['extrinsic_value'] = self._calculate_extrinsic_value(
-            processed_df['mid_price'],
-            processed_df['intrinsic_value']
+        # Calculate extrinsic value as mid_price minus intrinsic value
+        processed_df['extrinsic_value'] = np.maximum(
+            processed_df['mid_price'] - processed_df['intrinsic_value'],
+            0  # Ensure non-negative
         )
         
         return processed_df
@@ -152,8 +153,10 @@ class OptionsData:
     def _calculate_intrinsic_value(self, strike, spot, option_type):
         """Calculate intrinsic value for options"""
         if option_type == 'call':
+            # For calls: max(spot - strike, 0)
             return np.maximum(spot - strike, 0)
         else:  # put
+            # For puts: max(strike - spot, 0)
             return np.maximum(strike - spot, 0)
 
     def _calculate_extrinsic_value(self, price, intrinsic):
