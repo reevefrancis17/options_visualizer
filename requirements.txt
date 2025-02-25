@@ -1,0 +1,4 @@
+# This is a convenience file that points to the main requirements file
+# Install with: pip install -r requirements.txt
+
+-r python/requirements.txt 

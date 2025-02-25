@@ -1,72 +1,1236 @@
-
-[2025-01-26 17:27:52] Exception: Failed to fetch data for TSLA: name 'get_this_friday' is not defined
-Stack trace:
-Traceback (most recent call last):
-  File "/Users/reevefrancis/repos/options_visualizer/app.py", line 44, in get_option_chain
-    friday = get_this_friday()
-NameError: name 'get_this_friday' is not defined
-
-
-[2025-01-26 19:29:27] Failed to fetch expiry dates for TSLA: Could not get spot price for TSLA
-Stack trace:
-Traceback (most recent call last):
-  File "/Users/reevefrancis/repos/options_visualizer/app.py", line 85, in get_expiry_dates
-    options_data.fetch_data(symbol)
-  File "/Users/reevefrancis/repos/options_visualizer/python/data/options_data.py", line 23, in fetch_data
-    raise ValueError(f"Could not get spot price for {self.symbol}")
-ValueError: Could not get spot price for TSLA
-
-
---------------------------------------------------------------------------------
-
-[2025-01-26 19:29:28] Client Error: fetchExpiryDates
-Error: Failed to fetch expiry dates: {
-  "error": "Failed to fetch expiry dates for TSLA: Could not get spot price for TSLA"
-}
-
-Context: {'symbol': 'TSLA'}
---------------------------------------------------------------------------------
-
-[2025-01-26 19:29:28] Client Error: initialize
-Error: Failed to fetch expiry dates: {
-  "error": "Failed to fetch expiry dates for TSLA: Could not get spot price for TSLA"
-}
-
-Context: {'symbol': 'TSLA'}
---------------------------------------------------------------------------------
-
-[2025-01-26 19:31:29] Failed to fetch data for TSLA: cannot convert float NaN to integer
-Stack trace:
-Traceback (most recent call last):
-  File "/Users/reevefrancis/repos/options_visualizer/app.py", line 66, in get_option_chain
-    result = options_cache[symbol].get_chain_for_date(expiry_date)
-  File "/Users/reevefrancis/repos/options_visualizer/python/data/options_data.py", line 165, in get_chain_for_date
-    'call_volume': int(chain.sel(strike=strike, option_type='call').volume.item() or 0),
-ValueError: cannot convert float NaN to integer
-
-
---------------------------------------------------------------------------------
-
-[2025-01-26 19:31:29] Client Error: fetchOptionChain
-Error: HTTP error! status: 500, message: {
-  "error": "Failed to fetch data for TSLA: cannot convert float NaN to integer"
-}
-
-Context: {'symbol': 'TSLA', 'date': '2025-02-07'}
---------------------------------------------------------------------------------
-
-[2025-01-26 19:31:29] Client Error: fetchAndDisplayData
-Error: HTTP error! status: 500, message: {
-  "error": "Failed to fetch data for TSLA: cannot convert float NaN to integer"
-}
-
-Context: {'symbol': 'TSLA', 'date': '2025-02-07'}
---------------------------------------------------------------------------------
-
-[2025-01-26 19:31:29] Client Error: initialize
-Error: HTTP error! status: 500, message: {
-  "error": "Failed to fetch data for TSLA: cannot convert float NaN to integer"
-}
-
-Context: {'symbol': 'TSLA'}
---------------------------------------------------------------------------------
+=== New session started at 2025-02-25 09:40:39 ===
+2025-02-25 09:40:39,610 - __main__ - INFO - Starting new session of Options Visualizer
+2025-02-25 09:40:39,711 - __main__ - INFO - Initializing Options Visualizer App
+2025-02-25 09:40:39,817 - __main__ - INFO - Loading default ticker: SPY
+2025-02-25 09:40:40,026 - __main__ - INFO - Fetching options data for SPY
+2025-02-25 09:40:40,027 - yahoo_finance - INFO - Fetching fresh data for ticker: SPY
+2025-02-25 09:40:45,510 - yahoo_finance - INFO - Got current price for SPY: 592.025
+2025-02-25 09:40:45,808 - yahoo_finance - INFO - Found 33 expiration dates for SPY
+2025-02-25 09:40:45,808 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-02-25
+2025-02-25 09:40:46,079 - yahoo_finance - INFO - Fetched 67 calls and 94 puts for 2025-02-25
+2025-02-25 09:40:46,091 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:46,091 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:46,091 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:46,092 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:46,093 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:46,093 - options_data - INFO - Combined data shape: (161, 17)
+2025-02-25 09:40:46,093 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:46,095 - options_data - INFO - Price range: 0.01 to 193.78
+2025-02-25 09:40:46,095 - options_data - INFO - Strike range: 400.00 to 700.00
+2025-02-25 09:40:46,095 - options_data - INFO - DTE range: 0 to 0
+2025-02-25 09:40:46,095 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:46,095 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:46,096 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                       int64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:46,096 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:46,096 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:46,096 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:46,096 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:46,096 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:46,096 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:46,096 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:46,274 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:46,274 - options_data - INFO - Found 1 expiration dates
+2025-02-25 09:40:46,274 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-02-26
+2025-02-25 09:40:46,608 - yahoo_finance - INFO - Fetched 60 calls and 79 puts for 2025-02-26
+2025-02-25 09:40:46,627 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:46,627 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:46,627 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:46,628 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:46,628 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:46,628 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:46,629 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:46,629 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:46,630 - options_data - INFO - Combined data shape: (300, 17)
+2025-02-25 09:40:46,630 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:46,632 - options_data - INFO - Price range: 0.01 to 193.78
+2025-02-25 09:40:46,632 - options_data - INFO - Strike range: 400.00 to 700.00
+2025-02-25 09:40:46,632 - options_data - INFO - DTE range: 0 to 1
+2025-02-25 09:40:46,632 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:46,632 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:46,632 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                       int64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:46,632 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:46,632 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:46,632 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:46,632 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:46,632 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:46,632 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:46,632 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:46,633 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:46,633 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:46,633 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:46,633 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:46,633 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:46,951 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:46,951 - options_data - INFO - Found 2 expiration dates
+2025-02-25 09:40:46,951 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-02-27
+2025-02-25 09:40:47,216 - yahoo_finance - INFO - Fetched 60 calls and 84 puts for 2025-02-27
+2025-02-25 09:40:47,233 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:47,233 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:47,233 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:47,234 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:47,234 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:47,235 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:47,235 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:47,235 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:47,236 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:47,236 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:47,237 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:47,237 - options_data - INFO - Combined data shape: (444, 17)
+2025-02-25 09:40:47,237 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:47,240 - options_data - INFO - Price range: 0.01 to 193.78
+2025-02-25 09:40:47,240 - options_data - INFO - Strike range: 400.00 to 700.00
+2025-02-25 09:40:47,240 - options_data - INFO - DTE range: 0 to 2
+2025-02-25 09:40:47,240 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:47,240 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:47,241 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                       int64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:47,241 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:47,241 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:47,241 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:47,241 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:47,241 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:47,241 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:47,241 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:47,702 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:47,702 - options_data - INFO - Found 3 expiration dates
+2025-02-25 09:40:47,702 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-02-28
+2025-02-25 09:40:48,671 - yahoo_finance - INFO - Fetched 186 calls and 176 puts for 2025-02-28
+2025-02-25 09:40:48,685 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:48,685 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:48,685 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:48,686 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:48,686 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:48,686 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:48,687 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:48,687 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:48,688 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:48,688 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:48,688 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:48,688 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:48,689 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:48,689 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:48,690 - options_data - INFO - Combined data shape: (806, 17)
+2025-02-25 09:40:48,690 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:48,694 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:48,694 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:48,694 - options_data - INFO - DTE range: 0 to 3
+2025-02-25 09:40:48,694 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:48,694 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:48,694 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                       int64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:48,694 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:48,694 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:48,694 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:48,694 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:48,694 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:48,694 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:48,694 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:48,695 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:48,695 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:48,695 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:48,695 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:48,695 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:49,574 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:49,574 - options_data - INFO - Found 4 expiration dates
+2025-02-25 09:40:49,574 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-03
+2025-02-25 09:40:49,869 - yahoo_finance - INFO - Fetched 67 calls and 73 puts for 2025-03-03
+2025-02-25 09:40:49,878 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:49,878 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:49,878 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:49,878 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:49,878 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:49,879 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:49,879 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:49,879 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:49,880 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:49,880 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:49,880 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:49,880 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:49,880 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:49,880 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:49,881 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:49,881 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:49,881 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:49,882 - options_data - INFO - Combined data shape: (946, 17)
+2025-02-25 09:40:49,882 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:49,885 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:49,885 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:49,885 - options_data - INFO - DTE range: 0 to 6
+2025-02-25 09:40:49,885 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:49,885 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:49,886 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                       int64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:49,886 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:49,886 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:49,886 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:49,886 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:49,886 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:49,886 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:49,886 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:50,871 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:50,871 - options_data - INFO - Found 5 expiration dates
+2025-02-25 09:40:50,871 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-04
+2025-02-25 09:40:51,179 - yahoo_finance - INFO - Fetched 59 calls and 69 puts for 2025-03-04
+2025-02-25 09:40:51,192 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:51,192 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:51,192 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:51,192 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:51,192 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:51,193 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:51,193 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:51,193 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:51,194 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:51,194 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:51,194 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:51,194 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:51,194 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:51,195 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:51,195 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:51,195 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:51,195 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:51,195 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:40:51,196 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:40:51,196 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:40:51,197 - options_data - INFO - Combined data shape: (1074, 17)
+2025-02-25 09:40:51,197 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:51,202 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:51,202 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:51,202 - options_data - INFO - DTE range: 0 to 7
+2025-02-25 09:40:51,202 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:51,202 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:51,202 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                       int64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:51,202 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:51,202 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:51,202 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:51,202 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:51,202 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:51,203 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:51,203 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:51,203 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:52,301 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:52,302 - options_data - INFO - Found 6 expiration dates
+2025-02-25 09:40:52,302 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-05
+2025-02-25 09:40:52,586 - yahoo_finance - INFO - Fetched 44 calls and 63 puts for 2025-03-05
+2025-02-25 09:40:52,595 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:52,595 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:52,595 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:52,595 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:52,596 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:52,596 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:52,596 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:52,597 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:52,597 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:52,597 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:52,597 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:52,597 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:52,597 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:52,598 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:52,598 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:52,598 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:52,598 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:52,598 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:40:52,599 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:40:52,599 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:40:52,599 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:40:52,599 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:40:52,599 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:40:52,600 - options_data - INFO - Combined data shape: (1181, 17)
+2025-02-25 09:40:52,600 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:52,606 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:52,606 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:52,606 - options_data - INFO - DTE range: 0 to 8
+2025-02-25 09:40:52,606 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:52,606 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:52,606 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:52,606 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:52,606 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:52,606 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:52,606 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:52,606 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:52,606 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:52,606 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:53,820 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:53,821 - options_data - INFO - Found 7 expiration dates
+2025-02-25 09:40:53,821 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-06
+2025-02-25 09:40:54,132 - yahoo_finance - INFO - Fetched 50 calls and 59 puts for 2025-03-06
+2025-02-25 09:40:54,146 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:54,146 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:54,146 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:54,147 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:54,147 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:54,148 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:54,148 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:54,148 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:54,148 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:54,149 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:54,149 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:54,149 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:54,149 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:54,150 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:54,150 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:54,150 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:54,150 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:54,151 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:40:54,151 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:40:54,151 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:40:54,151 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:40:54,152 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:40:54,152 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:40:54,152 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:40:54,152 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:40:54,152 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:40:54,154 - options_data - INFO - Combined data shape: (1290, 17)
+2025-02-25 09:40:54,154 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:54,159 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:54,159 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:54,159 - options_data - INFO - DTE range: 0 to 9
+2025-02-25 09:40:54,159 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:54,159 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:54,160 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:54,160 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:54,160 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:54,160 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:54,160 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:54,160 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:54,160 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:54,160 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:55,487 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:55,488 - options_data - INFO - Found 8 expiration dates
+2025-02-25 09:40:55,488 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-07
+2025-02-25 09:40:55,788 - yahoo_finance - INFO - Fetched 101 calls and 93 puts for 2025-03-07
+2025-02-25 09:40:55,804 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:55,804 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:55,804 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:55,804 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:55,805 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:55,805 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:55,805 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:55,806 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:55,806 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:55,806 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:55,807 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:55,807 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:55,807 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:55,807 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:55,808 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:55,808 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:55,808 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:55,808 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:40:55,809 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:40:55,809 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:40:55,809 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:40:55,809 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:40:55,809 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:40:55,810 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:40:55,810 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:40:55,810 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:40:55,810 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:40:55,811 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:40:55,811 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:40:55,812 - options_data - INFO - Combined data shape: (1484, 17)
+2025-02-25 09:40:55,812 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:55,819 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:55,819 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:55,819 - options_data - INFO - DTE range: 0 to 10
+2025-02-25 09:40:55,819 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:55,819 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:55,819 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:55,819 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:55,819 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:55,819 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:55,819 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:55,819 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:55,819 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:55,819 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:57,343 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:57,344 - options_data - INFO - Found 9 expiration dates
+2025-02-25 09:40:57,344 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-14
+2025-02-25 09:40:57,649 - yahoo_finance - INFO - Fetched 96 calls and 95 puts for 2025-03-14
+2025-02-25 09:40:57,663 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:57,663 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:57,663 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:57,663 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:57,664 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:57,664 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:57,664 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:57,665 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:57,665 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:57,665 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:57,665 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:57,666 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:57,666 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:57,666 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:57,666 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:57,667 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:57,667 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:57,667 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:40:57,667 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:40:57,668 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:40:57,668 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:40:57,668 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:40:57,668 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:40:57,669 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:40:57,669 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:40:57,669 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:40:57,669 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:40:57,669 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:40:57,670 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:40:57,670 - options_data - INFO - Processing data for expiration date: 2025-03-14
+2025-02-25 09:40:57,670 - options_data - INFO - Processing 96 call options for 2025-03-14
+2025-02-25 09:40:57,670 - options_data - INFO - Processing 95 put options for 2025-03-14
+2025-02-25 09:40:57,672 - options_data - INFO - Combined data shape: (1675, 17)
+2025-02-25 09:40:57,672 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:57,680 - options_data - INFO - Price range: 0.01 to 234.20
+2025-02-25 09:40:57,680 - options_data - INFO - Strike range: 360.00 to 700.00
+2025-02-25 09:40:57,680 - options_data - INFO - DTE range: 0 to 17
+2025-02-25 09:40:57,680 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:57,680 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:57,680 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:57,680 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:57,680 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:57,680 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:57,680 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:57,680 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:57,680 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:57,680 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:40:59,369 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:40:59,369 - options_data - INFO - Found 10 expiration dates
+2025-02-25 09:40:59,369 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-21
+2025-02-25 09:40:59,833 - yahoo_finance - INFO - Fetched 209 calls and 184 puts for 2025-03-21
+2025-02-25 09:40:59,841 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:40:59,841 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:40:59,841 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:40:59,842 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:40:59,842 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:40:59,842 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:40:59,842 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:40:59,842 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:40:59,843 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:40:59,843 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:40:59,843 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:40:59,843 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:40:59,844 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:40:59,844 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:40:59,844 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:40:59,844 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:40:59,844 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:40:59,844 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:40:59,845 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:40:59,845 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:40:59,845 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:40:59,845 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:40:59,845 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:40:59,845 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:40:59,846 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:40:59,846 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:40:59,846 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:40:59,846 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:40:59,846 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:40:59,846 - options_data - INFO - Processing data for expiration date: 2025-03-14
+2025-02-25 09:40:59,847 - options_data - INFO - Processing 96 call options for 2025-03-14
+2025-02-25 09:40:59,847 - options_data - INFO - Processing 95 put options for 2025-03-14
+2025-02-25 09:40:59,847 - options_data - INFO - Processing data for expiration date: 2025-03-21
+2025-02-25 09:40:59,847 - options_data - INFO - Processing 209 call options for 2025-03-21
+2025-02-25 09:40:59,847 - options_data - INFO - Processing 184 put options for 2025-03-21
+2025-02-25 09:40:59,848 - options_data - INFO - Combined data shape: (2068, 17)
+2025-02-25 09:40:59,848 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:40:59,855 - options_data - INFO - Price range: 0.00 to 414.06
+2025-02-25 09:40:59,855 - options_data - INFO - Strike range: 180.00 to 820.00
+2025-02-25 09:40:59,855 - options_data - INFO - DTE range: 0 to 24
+2025-02-25 09:40:59,855 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:40:59,855 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:59,855 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:40:59,855 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:40:59,855 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:40:59,855 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:40:59,855 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:40:59,855 - options_data - INFO - Added known string column: currency
+2025-02-25 09:40:59,856 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:40:59,856 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:40:59,856 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:40:59,856 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:40:59,856 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:40:59,856 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:41:01,965 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:41:01,966 - options_data - INFO - Found 11 expiration dates
+2025-02-25 09:41:01,966 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-28
+2025-02-25 09:41:02,727 - yahoo_finance - INFO - Fetched 102 calls and 93 puts for 2025-03-28
+2025-02-25 09:41:02,743 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:41:02,743 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:41:02,743 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:41:02,744 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:41:02,744 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:41:02,745 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:41:02,745 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:41:02,745 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:41:02,746 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:41:02,746 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:41:02,746 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:41:02,747 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:41:02,747 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:41:02,747 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:41:02,748 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:41:02,748 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:41:02,748 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:41:02,748 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:41:02,749 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:41:02,749 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:41:02,749 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:41:02,749 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:41:02,750 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:41:02,750 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:41:02,750 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:41:02,750 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:41:02,750 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:41:02,751 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:41:02,751 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:41:02,751 - options_data - INFO - Processing data for expiration date: 2025-03-14
+2025-02-25 09:41:02,751 - options_data - INFO - Processing 96 call options for 2025-03-14
+2025-02-25 09:41:02,752 - options_data - INFO - Processing 95 put options for 2025-03-14
+2025-02-25 09:41:02,752 - options_data - INFO - Processing data for expiration date: 2025-03-21
+2025-02-25 09:41:02,752 - options_data - INFO - Processing 209 call options for 2025-03-21
+2025-02-25 09:41:02,752 - options_data - INFO - Processing 184 put options for 2025-03-21
+2025-02-25 09:41:02,752 - options_data - INFO - Processing data for expiration date: 2025-03-28
+2025-02-25 09:41:02,753 - options_data - INFO - Processing 102 call options for 2025-03-28
+2025-02-25 09:41:02,753 - options_data - INFO - Processing 93 put options for 2025-03-28
+2025-02-25 09:41:02,755 - options_data - INFO - Combined data shape: (2263, 17)
+2025-02-25 09:41:02,755 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:41:02,763 - options_data - INFO - Price range: 0.00 to 414.06
+2025-02-25 09:41:02,763 - options_data - INFO - Strike range: 180.00 to 820.00
+2025-02-25 09:41:02,763 - options_data - INFO - DTE range: 0 to 31
+2025-02-25 09:41:02,763 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:41:02,763 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:02,764 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:41:02,764 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:41:02,764 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:41:02,764 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:41:02,764 - options_data - INFO - Added known string column: currency
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:41:02,764 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:41:02,764 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:02,764 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:41:05,097 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:41:05,098 - options_data - INFO - Found 12 expiration dates
+2025-02-25 09:41:05,098 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-03-31
+2025-02-25 09:41:05,560 - yahoo_finance - INFO - Fetched 206 calls and 196 puts for 2025-03-31
+2025-02-25 09:41:05,573 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:41:05,573 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:41:05,573 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:41:05,574 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:41:05,574 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:41:05,574 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:41:05,575 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:41:05,575 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:41:05,576 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:41:05,576 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:41:05,576 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:41:05,576 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:41:05,576 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:41:05,577 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:41:05,577 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:41:05,577 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:41:05,577 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:41:05,578 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:41:05,578 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:41:05,578 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:41:05,578 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:41:05,578 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:41:05,579 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:41:05,579 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:41:05,579 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:41:05,579 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:41:05,580 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:41:05,580 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:41:05,580 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:41:05,580 - options_data - INFO - Processing data for expiration date: 2025-03-14
+2025-02-25 09:41:05,580 - options_data - INFO - Processing 96 call options for 2025-03-14
+2025-02-25 09:41:05,581 - options_data - INFO - Processing 95 put options for 2025-03-14
+2025-02-25 09:41:05,581 - options_data - INFO - Processing data for expiration date: 2025-03-21
+2025-02-25 09:41:05,581 - options_data - INFO - Processing 209 call options for 2025-03-21
+2025-02-25 09:41:05,581 - options_data - INFO - Processing 184 put options for 2025-03-21
+2025-02-25 09:41:05,581 - options_data - INFO - Processing data for expiration date: 2025-03-28
+2025-02-25 09:41:05,582 - options_data - INFO - Processing 102 call options for 2025-03-28
+2025-02-25 09:41:05,582 - options_data - INFO - Processing 93 put options for 2025-03-28
+2025-02-25 09:41:05,582 - options_data - INFO - Processing data for expiration date: 2025-03-31
+2025-02-25 09:41:05,582 - options_data - INFO - Processing 206 call options for 2025-03-31
+2025-02-25 09:41:05,582 - options_data - INFO - Processing 196 put options for 2025-03-31
+2025-02-25 09:41:05,584 - options_data - INFO - Combined data shape: (2665, 17)
+2025-02-25 09:41:05,584 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:41:05,594 - options_data - INFO - Price range: 0.00 to 414.06
+2025-02-25 09:41:05,594 - options_data - INFO - Strike range: 180.00 to 820.00
+2025-02-25 09:41:05,594 - options_data - INFO - DTE range: 0 to 34
+2025-02-25 09:41:05,594 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:41:05,594 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:05,594 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:41:05,594 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:41:05,594 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:41:05,594 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:41:05,594 - options_data - INFO - Added known string column: currency
+2025-02-25 09:41:05,594 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:41:05,595 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:41:05,595 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:41:05,595 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:41:05,595 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:05,595 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:41:08,319 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:41:08,320 - options_data - INFO - Found 13 expiration dates
+2025-02-25 09:41:08,320 - yahoo_finance - INFO - Fetching option chain for SPY expiring 2025-04-04
+2025-02-25 09:41:08,587 - yahoo_finance - INFO - Fetched 89 calls and 115 puts for 2025-04-04
+2025-02-25 09:41:08,595 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:41:08,595 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:41:08,595 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:41:08,595 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:41:08,595 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:41:08,595 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:41:08,595 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:41:08,596 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:41:08,596 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:41:08,596 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:41:08,596 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:41:08,597 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:41:08,597 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:41:08,597 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:41:08,597 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:41:08,597 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:41:08,597 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:41:08,597 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:41:08,598 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:41:08,598 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:41:08,598 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:41:08,598 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:41:08,598 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:41:08,598 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:41:08,598 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:41:08,599 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:41:08,599 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:41:08,599 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:41:08,599 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:41:08,599 - options_data - INFO - Processing data for expiration date: 2025-03-14
+2025-02-25 09:41:08,599 - options_data - INFO - Processing 96 call options for 2025-03-14
+2025-02-25 09:41:08,600 - options_data - INFO - Processing 95 put options for 2025-03-14
+2025-02-25 09:41:08,600 - options_data - INFO - Processing data for expiration date: 2025-03-21
+2025-02-25 09:41:08,600 - options_data - INFO - Processing 209 call options for 2025-03-21
+2025-02-25 09:41:08,600 - options_data - INFO - Processing 184 put options for 2025-03-21
+2025-02-25 09:41:08,600 - options_data - INFO - Processing data for expiration date: 2025-03-28
+2025-02-25 09:41:08,600 - options_data - INFO - Processing 102 call options for 2025-03-28
+2025-02-25 09:41:08,600 - options_data - INFO - Processing 93 put options for 2025-03-28
+2025-02-25 09:41:08,601 - options_data - INFO - Processing data for expiration date: 2025-03-31
+2025-02-25 09:41:08,601 - options_data - INFO - Processing 206 call options for 2025-03-31
+2025-02-25 09:41:08,601 - options_data - INFO - Processing 196 put options for 2025-03-31
+2025-02-25 09:41:08,601 - options_data - INFO - Processing data for expiration date: 2025-04-04
+2025-02-25 09:41:08,601 - options_data - INFO - Processing 89 call options for 2025-04-04
+2025-02-25 09:41:08,601 - options_data - INFO - Processing 115 put options for 2025-04-04
+2025-02-25 09:41:08,602 - options_data - INFO - Combined data shape: (2869, 17)
+2025-02-25 09:41:08,603 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:41:08,610 - options_data - INFO - Price range: 0.00 to 414.06
+2025-02-25 09:41:08,610 - options_data - INFO - Strike range: 180.00 to 820.00
+2025-02-25 09:41:08,610 - options_data - INFO - DTE range: 0 to 38
+2025-02-25 09:41:08,610 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:41:08,611 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:08,611 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:41:08,611 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:41:08,611 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:41:08,611 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:41:08,611 - options_data - INFO - Added known string column: currency
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:41:08,611 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:41:08,611 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:08,611 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:41:11,691 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:41:11,691 - options_data - INFO - Found 14 expiration dates
+2025-02-25 09:41:11,692 - yahoo_finance - WARNING - Reached maximum fetch time (30s). Returning partial data.
+2025-02-25 09:41:11,692 - yahoo_finance - INFO - Successfully cached data for SPY with price 592.025
+2025-02-25 09:41:11,692 - __main__ - INFO - Creating OptionsDataProcessor for SPY
+2025-02-25 09:41:11,692 - options_data - INFO - Initializing OptionsDataProcessor with current_price: 592.025
+2025-02-25 09:41:11,692 - options_data - INFO - Processing options data with current price: 592.025
+2025-02-25 09:41:11,692 - options_data - INFO - Processing data for expiration date: 2025-02-25
+2025-02-25 09:41:11,692 - options_data - INFO - Processing 67 call options for 2025-02-25
+2025-02-25 09:41:11,692 - options_data - INFO - Processing 94 put options for 2025-02-25
+2025-02-25 09:41:11,692 - options_data - INFO - Processing data for expiration date: 2025-02-26
+2025-02-25 09:41:11,692 - options_data - INFO - Processing 60 call options for 2025-02-26
+2025-02-25 09:41:11,693 - options_data - INFO - Processing 79 put options for 2025-02-26
+2025-02-25 09:41:11,693 - options_data - INFO - Processing data for expiration date: 2025-02-27
+2025-02-25 09:41:11,693 - options_data - INFO - Processing 60 call options for 2025-02-27
+2025-02-25 09:41:11,693 - options_data - INFO - Processing 84 put options for 2025-02-27
+2025-02-25 09:41:11,693 - options_data - INFO - Processing data for expiration date: 2025-02-28
+2025-02-25 09:41:11,693 - options_data - INFO - Processing 186 call options for 2025-02-28
+2025-02-25 09:41:11,693 - options_data - INFO - Processing 176 put options for 2025-02-28
+2025-02-25 09:41:11,693 - options_data - INFO - Processing data for expiration date: 2025-03-03
+2025-02-25 09:41:11,694 - options_data - INFO - Processing 67 call options for 2025-03-03
+2025-02-25 09:41:11,694 - options_data - INFO - Processing 73 put options for 2025-03-03
+2025-02-25 09:41:11,694 - options_data - INFO - Processing data for expiration date: 2025-03-04
+2025-02-25 09:41:11,694 - options_data - INFO - Processing 59 call options for 2025-03-04
+2025-02-25 09:41:11,694 - options_data - INFO - Processing 69 put options for 2025-03-04
+2025-02-25 09:41:11,694 - options_data - INFO - Processing data for expiration date: 2025-03-05
+2025-02-25 09:41:11,694 - options_data - INFO - Processing 44 call options for 2025-03-05
+2025-02-25 09:41:11,694 - options_data - INFO - Processing 63 put options for 2025-03-05
+2025-02-25 09:41:11,695 - options_data - INFO - Processing data for expiration date: 2025-03-06
+2025-02-25 09:41:11,695 - options_data - INFO - Processing 50 call options for 2025-03-06
+2025-02-25 09:41:11,695 - options_data - INFO - Processing 59 put options for 2025-03-06
+2025-02-25 09:41:11,695 - options_data - INFO - Processing data for expiration date: 2025-03-07
+2025-02-25 09:41:11,695 - options_data - INFO - Processing 101 call options for 2025-03-07
+2025-02-25 09:41:11,695 - options_data - INFO - Processing 93 put options for 2025-03-07
+2025-02-25 09:41:11,695 - options_data - INFO - Processing data for expiration date: 2025-03-14
+2025-02-25 09:41:11,695 - options_data - INFO - Processing 96 call options for 2025-03-14
+2025-02-25 09:41:11,696 - options_data - INFO - Processing 95 put options for 2025-03-14
+2025-02-25 09:41:11,696 - options_data - INFO - Processing data for expiration date: 2025-03-21
+2025-02-25 09:41:11,696 - options_data - INFO - Processing 209 call options for 2025-03-21
+2025-02-25 09:41:11,696 - options_data - INFO - Processing 184 put options for 2025-03-21
+2025-02-25 09:41:11,696 - options_data - INFO - Processing data for expiration date: 2025-03-28
+2025-02-25 09:41:11,696 - options_data - INFO - Processing 102 call options for 2025-03-28
+2025-02-25 09:41:11,696 - options_data - INFO - Processing 93 put options for 2025-03-28
+2025-02-25 09:41:11,697 - options_data - INFO - Processing data for expiration date: 2025-03-31
+2025-02-25 09:41:11,697 - options_data - INFO - Processing 206 call options for 2025-03-31
+2025-02-25 09:41:11,697 - options_data - INFO - Processing 196 put options for 2025-03-31
+2025-02-25 09:41:11,697 - options_data - INFO - Processing data for expiration date: 2025-04-04
+2025-02-25 09:41:11,697 - options_data - INFO - Processing 89 call options for 2025-04-04
+2025-02-25 09:41:11,697 - options_data - INFO - Processing 115 put options for 2025-04-04
+2025-02-25 09:41:11,698 - options_data - INFO - Combined data shape: (2869, 17)
+2025-02-25 09:41:11,698 - options_data - INFO - Calculating additional metrics
+2025-02-25 09:41:11,705 - options_data - INFO - Price range: 0.00 to 414.06
+2025-02-25 09:41:11,705 - options_data - INFO - Strike range: 180.00 to 820.00
+2025-02-25 09:41:11,705 - options_data - INFO - DTE range: 0 to 38
+2025-02-25 09:41:11,706 - options_data - INFO - Converting to xarray Dataset
+2025-02-25 09:41:11,706 - options_data - INFO - DataFrame columns: ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'contractSize', 'currency', 'option_type', 'expiration', 'DTE', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:11,706 - options_data - INFO - DataFrame dtypes: contractSymbol                    object
+lastTradeDate        datetime64[ns, UTC]
+strike                           float64
+lastPrice                        float64
+bid                              float64
+ask                              float64
+change                           float64
+percentChange                    float64
+volume                           float64
+openInterest                     float64
+impliedVolatility                float64
+inTheMoney                          bool
+contractSize                      object
+currency                          object
+option_type                       object
+expiration                datetime64[ns]
+DTE                                int64
+spot                             float64
+price                            float64
+intrinsic_value                  float64
+extrinsic_value                  float64
+dtype: object
+2025-02-25 09:41:11,706 - options_data - INFO - Added known string column: contractSymbol
+2025-02-25 09:41:11,706 - options_data - INFO - Added known string column: lastTradeDate
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: lastPrice
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: bid
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: ask
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: change
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: percentChange
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: volume
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: openInterest
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: impliedVolatility
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: inTheMoney
+2025-02-25 09:41:11,706 - options_data - INFO - Added known string column: contractSize
+2025-02-25 09:41:11,706 - options_data - INFO - Added known string column: currency
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: spot
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: price
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: intrinsic_value
+2025-02-25 09:41:11,706 - options_data - INFO - Detected numeric column: extrinsic_value
+2025-02-25 09:41:11,706 - options_data - INFO - Numeric columns: ['lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility', 'inTheMoney', 'spot', 'price', 'intrinsic_value', 'extrinsic_value']
+2025-02-25 09:41:11,706 - options_data - INFO - String columns: ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+2025-02-25 09:41:14,686 - options_data - INFO - Successfully processed options data into xarray Dataset
+2025-02-25 09:41:14,687 - __main__ - INFO - Getting expiration dates
+2025-02-25 09:41:14,687 - options_data - INFO - Found 14 expiration dates
+2025-02-25 09:41:14,687 - __main__ - INFO - Setting to lowest DTE expiry: 2025-02-25 00:00:00
+2025-02-25 09:41:14,711 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,745 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,766 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,786 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,805 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,825 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,846 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,866 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,887 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,907 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,927 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,947 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,968 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:14,988 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:15,010 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:15,211 - __main__ - INFO - Forcing plot refresh to ensure data is displayed
+2025-02-25 09:41:15,242 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:15,868 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:15,922 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:15,978 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:16,276 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:16,332 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:16,387 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:16,444 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:16,499 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:16,948 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,002 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,059 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,115 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,171 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,227 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,284 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,339 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,395 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,451 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,507 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,563 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,619 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,675 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,731 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,787 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,843 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,899 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:17,955 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,011 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,295 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,351 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,407 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,463 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,519 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,839 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:18,894 - __main__ - ERROR - Error in crosshair update: y must be a sequence
+2025-02-25 09:41:19,891 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:21,193 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:21,747 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:22,321 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:22,899 - __main__ - INFO - Plot updated successfully for Spot
+2025-02-25 09:41:23,445 - __main__ - INFO - Plot updated successfully for Spot
