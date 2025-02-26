@@ -63,6 +63,8 @@ This application fetches real-time options data from Yahoo Finance using the `yf
 ## Features
 
 - **Progressive Loading**: Data loads incrementally, showing partial results while fetching continues
+- **Complete Data Fetching**: Loads all available expiration dates without time limits
+- **Threaded Data Fetching**: Uses background threads to keep the UI responsive during data loading
 - **Automatic Data Fetching**: Automatically fetches and processes options data
 - **Interactive Visualization**: Hover over the chart to see exact values
 - **Multiple Metrics**: View different aspects of options data (price, volume, etc.)
@@ -77,13 +79,13 @@ If you encounter any issues:
 2. Verify Python is installed correctly: `python --version`
 3. Try reinstalling requirements: `pip install -r requirements.txt --force-reinstall`
 4. Check the error logs in the `debug` directory
-5. For timeout errors, try again later as Yahoo Finance may have rate limits
+5. For rate limit errors, try again later as Yahoo Finance may have rate limits
 
 ## Notes
 
 - Data is fetched in real-time from Yahoo Finance
 - Market data is only available during market hours
 - Some stocks might have limited options data available
-- The application implements a 30-second timeout for data fetching to prevent hanging
-- For tickers with many expiration dates, the app may only load the nearest ones due to the timeout
+- The application will load all available expiration dates for a ticker
 - The progressive loading feature allows you to see and interact with partial data while more is being fetched
+- For tickers with many expiration dates, the app will continue loading in the background while allowing you to interact with the data that's already loaded

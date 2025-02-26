@@ -23,7 +23,7 @@ class YahooFinanceAPI:
                 return data, price
         return None, None
 
-    def get_options_data(self, ticker, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None, max_dates=10):
+    def get_options_data(self, ticker, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None, max_dates=None):
         """
         Fetch options data for a ticker with progressive loading support
         
@@ -34,11 +34,12 @@ class YahooFinanceAPI:
                 - current_price: The stock's current price
                 - processed_dates: Number of expiration dates processed so far
                 - total_dates: Total number of expiration dates found
-            max_dates: Maximum number of expiration dates to fetch (default: 10)
+            max_dates: Maximum number of expiration dates to fetch (default: None, fetch all dates)
         
         Returns:
             Tuple of (options_data, current_price)
         """
+        # Try to get data from cache first
         cached_data, cached_price = self._get_from_cache(ticker)
         if cached_data:
             logger.info(f"Using cached data for {ticker} with price {cached_price}")
@@ -52,8 +53,6 @@ class YahooFinanceAPI:
         # Initialize variables to track partial data fetching
         options_data = {}
         current_price = None
-        fetch_start_time = time.time()
-        max_fetch_time = 20  # Maximum time to spend fetching data (in seconds)
         
         for attempt in range(self.max_retries):
             try:
@@ -82,10 +81,9 @@ class YahooFinanceAPI:
                 logger.info(f"Found {len(options_dates)} expiration dates for {ticker}")
                 
                 # Sort dates to prioritize near-term expirations
-                # Convert string dates to datetime objects for sorting
                 sorted_dates = sorted(options_dates, key=lambda date_str: pd.to_datetime(date_str))
                 
-                # Limit the number of dates to fetch
+                # Limit the number of dates to fetch if max_dates is specified
                 if max_dates and len(sorted_dates) > max_dates:
                     logger.info(f"Limiting to {max_dates} expiration dates (out of {len(sorted_dates)})")
                     sorted_dates = sorted_dates[:max_dates]
@@ -94,23 +92,20 @@ class YahooFinanceAPI:
                 total_dates = len(sorted_dates)
                 processed_dates = 0
                 
-                # Get options data
+                # Fetch option chains for each date
                 for date in sorted_dates:
-                    # Check if we've exceeded the maximum fetch time
-                    if time.time() - fetch_start_time > max_fetch_time:
-                        logger.warning(f"Reached maximum fetch time ({max_fetch_time}s). Returning partial data.")
-                        break
-                        
-                    logger.info(f"Fetching option chain for {ticker} expiring {date}")
                     try:
                         opt = stock.option_chain(date)
                         if opt is None or not hasattr(opt, 'calls') or not hasattr(opt, 'puts'):
                             logger.error(f"Invalid options data for {ticker} on {date}")
                             continue
+                            
                         options_data[date] = {'calls': opt.calls, 'puts': opt.puts}
-                        logger.info(f"Fetched {len(opt.calls)} calls and {len(opt.puts)} puts for {date}")
-                        
                         processed_dates += 1
+                        
+                        # Log less frequently for better performance
+                        if processed_dates % 5 == 0 or processed_dates == 1 or processed_dates == total_dates:
+                            logger.info(f"Fetched {processed_dates}/{total_dates} expiration dates for {ticker}")
                         
                         # Call the progress callback if provided
                         if progress_callback and current_price:
@@ -123,11 +118,11 @@ class YahooFinanceAPI:
                         # Continue with other dates instead of failing completely
                         continue
                 
-                # Return partial data if we have at least one valid expiration date
+                # Return data if we have at least one valid expiration date
                 if options_data and current_price:
                     # Store both data and price in cache
                     self._cache[ticker] = (options_data, current_price, time.time())
-                    logger.info(f"Successfully cached data for {ticker} with price {current_price}")
+                    logger.info(f"Successfully cached data for {ticker} with {len(options_data)} expiration dates")
                     return options_data, current_price
                 else:
                     logger.error(f"No valid options data found for {ticker}")

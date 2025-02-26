@@ -1,15 +1,18 @@
 # offline_app.py
 import tkinter as tk
 from tkinter import ttk, messagebox
+import matplotlib
+# Force the TkAgg backend for better event handling with Tkinter
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.ticker import FuncFormatter
 import pandas as pd
 import numpy as np
 import logging
-import re
 import time
 import os
+import threading
 from yahoo_finance import YahooFinanceAPI
 from options_data import OptionsDataProcessor
 import traceback
@@ -41,6 +44,19 @@ class OptionsVisualizerApp(tk.Tk):
     GUI application titled "Options Visualizer" for displaying options data.
     Features a search bar, navigation buttons for expiry dates, and line plot of options data.
     """
+    # Field mapping for plot display
+    FIELD_MAPPING = {
+        "Spot": "spot",
+        "Bid": "bid",
+        "Ask": "ask",
+        "Volume": "volume",
+        "Intrinsic Value": "intrinsic_value",
+        "Extrinsic Value": "extrinsic_value",
+    }
+    
+    # Price-related fields that need dollar formatting
+    PRICE_FIELDS = ["Spot", "Bid", "Ask", "Intrinsic Value", "Extrinsic Value"]
+    
     def __init__(self):
         super().__init__()
         self.title("Options Visualizer")
@@ -56,18 +72,56 @@ class OptionsVisualizerApp(tk.Tk):
         self.last_update_time = 0
         self.data_loaded = False  # Track if data has been loaded
         
+        # Initialize crosshair variables
+        self.h_line_call = None  # Horizontal line for calls
+        self.h_line_put = None   # Horizontal line for puts
+        self.v_line = None       # Vertical line for strike
+        self.strike_line = None
+        self.value_line = None
+        self.call_value_line = None
+        self.put_value_line = None
+        self.background = None
+        self.original_legend_elements = []
+        self.current_ax = None
+        self.current_display_field = None
+        self.is_price_field = False
+        self.last_crosshair_update = 0
+        
         self.create_widgets()
         
-        # Schedule loading of default ticker after GUI is ready
-        self.after(100, self.load_default_ticker)
+        # Load default ticker immediately
+        self.load_default_ticker()
         
     def create_widgets(self):
+        """Create and arrange all UI widgets"""
         # Top frame for ticker input and navigation
         top_frame = tk.Frame(self)
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
         
-        # Left side - Ticker input
-        ticker_frame = tk.Frame(top_frame)
+        # Create ticker input section
+        self._create_ticker_section(top_frame)
+        
+        # Create expiry navigation section
+        self._create_navigation_section(top_frame)
+        
+        # Create main container for plot
+        main_container = tk.Frame(self)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create plot options
+        self._create_plot_options(main_container)
+        
+        # Create matplotlib figure and canvas
+        self.figure = plt.Figure(figsize=(10, 6))
+        self.canvas = FigureCanvasTkAgg(self.figure, main_container)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Bind Enter key to search function
+        self.bind('<Return>', lambda event: self.search_ticker())
+    
+    def _create_ticker_section(self, parent):
+        """Create the ticker input section"""
+        ticker_frame = tk.Frame(parent)
         ticker_frame.pack(side=tk.LEFT)
         
         tk.Label(ticker_frame, text="Ticker:").pack(side=tk.LEFT)
@@ -79,9 +133,10 @@ class OptionsVisualizerApp(tk.Tk):
         # Status label for last update time
         self.status_label = tk.Label(ticker_frame, text="Not updated yet", font=("Arial", 8))
         self.status_label.pack(side=tk.LEFT, padx=10)
-        
-        # Right side - Expiry navigation
-        nav_frame = tk.Frame(top_frame)
+    
+    def _create_navigation_section(self, parent):
+        """Create the expiry date navigation section"""
+        nav_frame = tk.Frame(parent)
         nav_frame.pack(side=tk.RIGHT, padx=20)
         
         self.prev_button = tk.Button(nav_frame, text="◀", command=self.prev_expiry, state=tk.DISABLED)
@@ -92,34 +147,22 @@ class OptionsVisualizerApp(tk.Tk):
         
         self.next_button = tk.Button(nav_frame, text="▶", command=self.next_expiry, state=tk.DISABLED)
         self.next_button.pack(side=tk.LEFT, padx=5)
-        
-        # Create main container for plot
-        main_container = tk.Frame(self)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Plot options
+    
+    def _create_plot_options(self, parent):
+        """Create the plot type selection options"""
         self.plot_var = tk.StringVar(value="Spot")
-        plot_options_frame = ttk.LabelFrame(main_container, text="Plot Type", padding=5)
+        plot_options_frame = ttk.LabelFrame(parent, text="Plot Type", padding=5)
         plot_options_frame.pack(fill=tk.X, pady=5)
         
-        self.plot_options = [
-            ("Spot", "Spot"),
-            ("Last Price", "Last Price"),
-            ("Bid", "Bid"),
-            ("Ask", "Ask"),
-            ("Volume", "Volume"),
-            ("Intrinsic Value", "Intrinsic Value"),
-            ("Extrinsic Value", "Extrinsic Value"),
-        ]
-        
-        for text, value in self.plot_options:
-            ttk.Radiobutton(plot_options_frame, text=text, value=value, 
-                          variable=self.plot_var, command=self.update_plot).pack(side=tk.LEFT, padx=5)
-        
-        # Figure for matplotlib
-        self.figure = plt.Figure(figsize=(10, 6))
-        self.canvas = FigureCanvasTkAgg(self.figure, main_container)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        # Use the keys from FIELD_MAPPING for plot options
+        for option in self.FIELD_MAPPING.keys():
+            ttk.Radiobutton(
+                plot_options_frame, 
+                text=option, 
+                value=option, 
+                variable=self.plot_var, 
+                command=self.update_plot
+            ).pack(side=tk.LEFT, padx=5)
     
     def prev_expiry(self):
         if self.current_expiry_index > 0:
@@ -134,91 +177,98 @@ class OptionsVisualizerApp(tk.Tk):
             self.update_plot()
     
     def update_expiry_display(self):
-        if self.expiry_dates:
-            current_date = self.expiry_dates[self.current_expiry_index]
-            self.expiry_label.config(text=current_date.strftime('%Y-%m-%d'))
-            self.prev_button.config(state=tk.NORMAL if self.current_expiry_index > 0 else tk.DISABLED)
-            self.next_button.config(state=tk.NORMAL if self.current_expiry_index < len(self.expiry_dates) - 1 else tk.DISABLED)
-        else:
+        """Update the expiry date display and navigation buttons"""
+        if not self.expiry_dates:
             self.expiry_label.config(text="No data")
             self.prev_button.config(state=tk.DISABLED)
             self.next_button.config(state=tk.DISABLED)
+            return
+            
+        # Get current date and update label
+        current_date = self.expiry_dates[self.current_expiry_index]
+        self.expiry_label.config(text=current_date.strftime('%Y-%m-%d'))
+        
+        # Update navigation buttons
+        self.prev_button.config(state=tk.NORMAL if self.current_expiry_index > 0 else tk.DISABLED)
+        self.next_button.config(state=tk.NORMAL if self.current_expiry_index < len(self.expiry_dates) - 1 else tk.DISABLED)
+        
+        # Log navigation state
+        logger.info(f"Updated expiry display: {current_date.strftime('%Y-%m-%d')} " +
+                   f"({self.current_expiry_index + 1}/{len(self.expiry_dates)})")
     
     def load_default_ticker(self):
         """Load the default ticker (SPY) on startup"""
         logger.info("Loading default ticker: SPY")
         self.ticker_entry.insert(0, "SPY")
         
-        # Show loading message immediately
-        self.show_loading_message("Loading SPY options data...")
+        # Update status to show loading
+        self.status_label.config(text="Loading SPY data...")
         
-        # Use after to give the GUI time to render before loading data
-        self.after(200, self._load_default_ticker_data)
+        # Load data immediately
+        self._load_default_ticker_data()
     
     def _load_default_ticker_data(self):
         """Actually load the data for the default ticker"""
         ticker = "SPY"
-        try:
-            # Update status to show loading
-            self.status_label.config(text="Loading data...")
-            
-            # Fetch data from Yahoo Finance with progressive loading
-            logger.info(f"Fetching options data for {ticker}")
-            options_data, current_price = self.api.get_options_data(ticker, 
-                                                                   self.update_with_partial_data,
-                                                                   max_dates=8)  # Limit to 8 expiration dates for faster loading
-            
-            if options_data is None or current_price is None:
-                logger.error(f"Failed to fetch data for {ticker}")
-                self.status_label.config(text="Failed to load default data")
-                self.show_loading_message("Failed to load default data. Please try searching manually.")
-                return
-                
-            # Final update with complete data
-            self.update_with_complete_data(ticker, options_data, current_price)
-                
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error loading default ticker: {error_msg}")
-            self.status_label.config(text=f"Error: {error_msg[:20]}...")
-            self.show_loading_message(f"Error loading default data: {error_msg[:50]}...\nPlease try searching manually.")
+        # Update status to show loading
+        self.status_label.config(text="Loading SPY data...")
+        
+        # Use threading for data fetching
+        threading.Thread(target=self._fetch_data, args=(ticker,), daemon=True).start()
     
     def update_with_partial_data(self, partial_data, current_price, processed_dates, total_dates):
         """Update the UI with partial data as it's being loaded"""
+        # Handle different stages of data loading
         if not current_price:
-            # Still waiting for price data
-            self.show_loading_message(f"Fetching current price for {self.ticker_entry.get()}...")
+            self.status_label.config(text="Fetching price...")
             return
             
         if not partial_data:
-            # Got price but no option data yet
-            self.show_loading_message(f"Got price (${current_price:.2f}) for {self.ticker_entry.get()}\nFetching options data...")
+            self.status_label.config(text=f"Price: ${current_price:.2f} - Fetching data...")
             return
             
-        # Update loading message to show progress
-        progress_pct = int((processed_dates / total_dates) * 100)
-        self.show_loading_message(f"Loading {self.ticker_entry.get()} options data...\n"
-                                 f"Current price: ${current_price:.2f}\n"
-                                 f"{progress_pct}% complete ({processed_dates}/{total_dates} expiry dates)")
+        # Calculate progress percentage
+        progress_pct = int((processed_dates / total_dates) * 100) if total_dates > 0 else 0
         
-        # If we have at least one expiration date with data, start processing and displaying it
-        if processed_dates >= 1:
-            try:
-                # Process the partial data
-                temp_processor = OptionsDataProcessor(partial_data, current_price)
+        # Update status label with progress
+        self.status_label.config(text=f"Loading: {progress_pct}% ({processed_dates}/{total_dates})")
+        
+        try:
+            # Process the partial data
+            temp_processor = OptionsDataProcessor(partial_data, current_price)
+            expiry_dates = temp_processor.get_expirations()
+            
+            if not expiry_dates:
+                return
                 
-                # Get expiration dates from partial data
-                expiry_dates = temp_processor.get_expirations()
-                if expiry_dates:
-                    # Store the processor and dates temporarily
-                    self.temp_data_processor = temp_processor
-                    self.temp_expiry_dates = expiry_dates
-                    
-                    # Update the UI with the first available expiration date
-                    self.after(10, self.update_with_temp_data)
-            except Exception as e:
-                logger.error(f"Error processing partial data: {str(e)}")
-                # Continue loading - don't interrupt the process for partial data errors
+            # Store temporary data
+            self.temp_data_processor = temp_processor
+            self.temp_expiry_dates = expiry_dates
+            
+            # If this is the first time we're getting data, update the UI
+            if not hasattr(self, 'data_processor') or not self.data_loaded:
+                self.update_with_temp_data()
+            # If we already have data displayed but got more dates, update the expiry display
+            elif len(expiry_dates) > len(self.expiry_dates):
+                # Only update if we have more dates than before
+                self.expiry_dates = expiry_dates
+                self.update_expiry_display()
+                
+                # Update status with new date count
+                current_dates = len(self.expiry_dates)
+                self.status_label.config(text=f"Loading: {progress_pct}% ({current_dates} dates so far)")
+                
+                # Enable navigation if we have at least 2 dates
+                if len(self.expiry_dates) >= 2:
+                    self.next_button.config(state=tk.NORMAL)
+                
+                # Re-apply interpolation with the updated data
+                if hasattr(self, 'data_processor') and self.data_processor is not None:
+                    logger.info("Re-applying interpolation with updated data")
+                    self.data_processor.interpolate_missing_values_2d()
+        except Exception as e:
+            logger.error(f"Error processing partial data: {str(e)}")
+            # Continue loading - don't interrupt the process for partial data errors
     
     def update_with_temp_data(self):
         """Update the UI with temporary data while loading continues"""
@@ -226,45 +276,58 @@ class OptionsVisualizerApp(tk.Tk):
             return
             
         try:
-            # Store the temporary data as the current data
+            # Use temporary data as current data
             self.data_processor = self.temp_data_processor
             self.expiry_dates = self.temp_expiry_dates
+            self.current_expiry_index = 0  # Default to first expiry date
             
-            # Default to first expiry date (lowest DTE)
-            self.current_expiry_index = 0
+            # Apply interpolation to the temporary data
+            logger.info("Applying interpolation to temporary data")
+            self.data_processor.interpolate_missing_values_2d()
             
             # Update UI
             self.update_expiry_display()
             self.update_plot()
             
-            # Add a "Loading..." indicator to the title
-            if hasattr(self, 'figure') and hasattr(self.figure, 'axes') and self.figure.axes:
-                ax = self.figure.axes[0]
-                current_title = ax.get_title()
-                ax.set_title(f"{current_title} (Loading more data...)")
-                self.canvas.draw_idle()  # Use draw_idle for better performance
+            # Enable navigation if we have at least 2 dates
+            if len(self.expiry_dates) >= 2:
+                self.next_button.config(state=tk.NORMAL)
+            
+            # Update status to indicate more data is loading
+            current_dates = len(self.expiry_dates)
+            self.status_label.config(text=f"Loading: {current_dates} dates so far...")
+            
+            # Mark data as partially loaded to enable functionality
+            self.data_loaded = True
+            
         except Exception as e:
             logger.error(f"Error updating with temporary data: {str(e)}")
+            logger.error(traceback.format_exc())
     
     def update_with_complete_data(self, ticker, options_data, current_price):
         """Update the UI with complete data after loading is finished"""
         try:
-            # Check if we have at least one expiration date with data
+            # Reset UI state at the end regardless of outcome
+            def reset_ui():
+                self.search_button.config(state='normal')
+                self.config(cursor="")
+            
+            # Check if we have data
             if not options_data:
                 logger.error(f"No options data available for {ticker}")
                 self.status_label.config(text="No data available")
-                self.show_loading_message("No options data available. Please try another ticker.")
+                reset_ui()
                 return
                 
             logger.info(f"Creating OptionsDataProcessor for {ticker}")
             self.data_processor = OptionsDataProcessor(options_data, current_price)
             ds = self.data_processor.get_data()
             
-            # Check if dataset is None or has no data
+            # Check if dataset is valid
             if ds is None or len(ds.variables) == 0:
                 logger.error(f"No options data available for {ticker}")
                 self.status_label.config(text="No data available")
-                self.show_loading_message("No options data available. Please try another ticker.")
+                reset_ui()
                 return
                 
             # Get all expiration dates
@@ -273,12 +336,16 @@ class OptionsVisualizerApp(tk.Tk):
             if not self.expiry_dates:
                 logger.error(f"No expiration dates found for {ticker}")
                 self.status_label.config(text="No expiry dates")
-                self.show_loading_message("No expiration dates found. Please try another ticker.")
+                reset_ui()
                 return
             
             # Default to first expiry date (lowest DTE)
             self.current_expiry_index = 0
             logger.info(f"Setting to lowest DTE expiry: {self.expiry_dates[0]}")
+            
+            # Re-apply interpolation one final time with all data
+            logger.info("Applying final interpolation with complete data")
+            self.data_processor.interpolate_missing_values_2d()
             
             # Update UI
             self.update_expiry_display()
@@ -288,16 +355,24 @@ class OptionsVisualizerApp(tk.Tk):
             self.current_ticker = ticker
             self.last_update_time = time.time()
             current_time = time.strftime("%H:%M:%S", time.localtime(self.last_update_time))
-            self.status_label.config(text=f"Updated: {current_time}")
             
-            # Mark data as loaded and schedule a refresh to ensure plot is updated
+            # Update status label with completion info
+            total_dates = len(self.expiry_dates)
+            self.status_label.config(text=f"Updated: {current_time} | {total_dates} dates loaded")
+            
+            # Mark data as loaded and refresh plot immediately
             self.data_loaded = True
-            self.after(500, self.force_refresh_plot)
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error updating with complete data: {error_msg}")
-            self.status_label.config(text=f"Error: {error_msg[:20]}...")
+            self.force_refresh_plot()
             
+            # Reset UI state
+            reset_ui()
+            
+        except Exception as e:
+            logger.error(f"Error updating with complete data: {str(e)}")
+            self.status_label.config(text=f"Error: {str(e)[:30]}...")
+            self.search_button.config(state='normal')
+            self.config(cursor="")
+    
     def clean_ticker(self, ticker):
         """Clean and validate ticker input"""
         logger.info(f"Cleaning ticker input: {ticker}")
@@ -317,290 +392,280 @@ class OptionsVisualizerApp(tk.Tk):
         logger.info(f"Searching for ticker: {ticker}")
         self.search_button.config(state='disabled')
         self.config(cursor="watch")
-        self.show_loading_message(f"Fetching data for {ticker}...")
         
         # Update status to show loading
-        self.status_label.config(text="Loading data...")
+        self.status_label.config(text=f"Loading {ticker} data...")
         
         # Reset data loaded flag
         self.data_loaded = False
         
-        # Set a timeout for the data fetching process
-        fetch_timeout = 45000  # 45 seconds in milliseconds
-        self.fetch_timeout_id = self.after(fetch_timeout, self.handle_fetch_timeout)
-        
+        # Use threading for data fetching
+        threading.Thread(target=self._fetch_data, args=(ticker,), daemon=True).start()
+    
+    def _fetch_data(self, ticker):
+        """Fetch data in a separate thread to keep UI responsive"""
         try:
+            # Record start time for progress estimation
+            self.last_update_time = time.time()
+            
             # Fetch data from Yahoo Finance with progressive loading
             logger.info(f"Fetching options data for {ticker}")
             options_data, current_price = self.api.get_options_data(ticker, 
-                                                                   self.update_with_partial_data,
-                                                                   max_dates=8)  # Limit to 8 expiration dates for faster loading
+                                                                   self.update_with_partial_data)
             
-            # Cancel the timeout since we got a response
-            self.after_cancel(self.fetch_timeout_id)
-            
+            # Use after to update UI from the main thread
             if options_data is None or current_price is None:
                 logger.error(f"Failed to fetch data for {ticker}")
-                messagebox.showerror("Error", 
-                    f"Failed to fetch data for {ticker}. Please try again in a few moments.")
-                self.hide_loading_message()
-                self.search_button.config(state='normal')
-                self.config(cursor="")
+                self.after(0, lambda: self._handle_fetch_error(ticker, "Failed to fetch data"))
                 return
             
-            # Final update with complete data
-            self.update_with_complete_data(ticker, options_data, current_price)
+            # Final update with complete data (using after to ensure it runs in the main thread)
+            self.after(0, lambda: self.update_with_complete_data(ticker, options_data, current_price))
             
         except Exception as e:
-            # Cancel the timeout since we got an error
-            self.after_cancel(self.fetch_timeout_id)
-            
             error_msg = str(e)
-            logger.error(f"Error in search_ticker: {error_msg}")
-            if "Too Many Requests" in error_msg:
-                messagebox.showerror("Rate Limit Error", 
-                    "Yahoo Finance rate limit reached. Please try again in a few minutes.")
-            else:
-                messagebox.showerror("Error", 
-                    f"An error occurred: {error_msg}")
-        finally:
-            self.search_button.config(state='normal')
-            self.config(cursor="")
-            self.hide_loading_message()
+            logger.error(f"Error in _fetch_data: {error_msg}")
+            self.after(0, lambda: self._handle_fetch_error(ticker, error_msg))
     
-    def show_loading_message(self, message):
-        """Show a loading message in the plot area"""
-        self.figure.clear()
-        ax = self.figure.add_subplot(111)
-        ax.text(0.5, 0.5, message, ha='center', va='center', fontsize=12)
-        ax.set_axis_off()
-        # Use draw_idle for better performance
-        self.canvas.draw_idle()
+    def _handle_fetch_error(self, ticker, error_msg):
+        """Handle errors from data fetching"""
+        # Update status label with error info
+        self.status_label.config(text=f"Error: {error_msg[:30]}...")
+        
+        # Show appropriate error message
+        if "Too Many Requests" in error_msg:
+            messagebox.showerror("Rate Limit Error", 
+                "Yahoo Finance rate limit reached. Please try again in a few minutes.")
+        else:
+            messagebox.showerror("Error", 
+                f"An error occurred while fetching data for {ticker}: {error_msg}")
+        
+        # If we have partial data, try to display it
+        if hasattr(self, 'temp_data_processor') and hasattr(self, 'temp_expiry_dates'):
+            logger.info("Using partial data after error")
+            
+            # Use temporary data as current data
+            self.data_processor = self.temp_data_processor
+            self.expiry_dates = self.temp_expiry_dates
+            self.current_expiry_index = 0
+            
+            # Apply interpolation to the partial data
+            logger.info("Applying interpolation to partial data after error")
+            try:
+                self.data_processor.interpolate_missing_values_2d()
+            except Exception as e:
+                logger.error(f"Error applying interpolation after fetch error: {str(e)}")
+                logger.error(traceback.format_exc())
+            
+            # Update UI
+            self.update_expiry_display()
+            self.update_plot()
+            
+            # Enable navigation if we have at least 2 dates
+            if len(self.expiry_dates) >= 2:
+                self.next_button.config(state=tk.NORMAL)
+            
+            # Store the current ticker and update time
+            self.current_ticker = ticker
+            self.last_update_time = time.time()
+            current_time = time.strftime("%H:%M:%S", time.localtime(self.last_update_time))
+            
+            # Update status with partial data info
+            total_dates = len(self.expiry_dates)
+            self.status_label.config(text=f"Partial data: {current_time} | {total_dates} dates")
+            
+            # Mark data as loaded
+            self.data_loaded = True
+        
+        # Reset UI state
+        self.search_button.config(state='normal')
+        self.config(cursor="")
     
-    def hide_loading_message(self):
-        """Clear the loading message"""
-        self.figure.clear()
-        # Use draw_idle for better performance
-        self.canvas.draw_idle()
-    
+    @staticmethod
+    def dollar_formatter(x, pos):
+        """Format a number as a dollar amount"""
+        return f'${x:.0f}'
+        
     def update_plot(self):
         """Update the plot with current data"""
         if not self.data_processor or not self.expiry_dates:
             logger.error("Cannot update plot: No data processor or expiry dates")
-            self.show_loading_message("No data available for plotting")
+            self.status_label.config(text="No data available for plotting")
             return
             
         try:
             current_date = self.expiry_dates[self.current_expiry_index]
-            
-            # Get data for the current expiration date using the new method
             df = self.data_processor.get_data_for_expiry(current_date)
             
             if df is None or df.empty:
                 logger.error(f"No data available for expiry date {current_date}")
-                self.show_loading_message(f"No data for {current_date.strftime('%Y-%m-%d')}")
+                self.status_label.config(text=f"No data for {current_date.strftime('%Y-%m-%d')}")
                 return
             
             # Clear previous plot
             self.figure.clear()
             ax = self.figure.add_subplot(111)
             
-            # Plot calls and puts separately
             display_field = self.plot_var.get()
-            
-            # Map display name to actual field name
-            field_mapping = {
-                "Spot": "spot",
-                "Last Price": "lastPrice",
-                "Bid": "bid",
-                "Ask": "ask",
-                "Volume": "volume",
-                "Intrinsic Value": "intrinsic_value",
-                "Extrinsic Value": "extrinsic_value",
-            }
-            
-            # Get the database field name from the display name
-            plot_field = field_mapping.get(display_field, display_field)
+            plot_field = self.FIELD_MAPPING.get(display_field, display_field)
             
             calls = df[df['option_type'] == 'call']
             puts = df[df['option_type'] == 'put']
             
-            # Create plot lines and store them for legend
-            self.call_line = None
-            self.put_line = None
-            self.price_line = None
+            # Plot lines with explicit labels
+            self.call_line = ax.plot(calls['strike'], calls[plot_field], 'b-', label='Calls: --')[0] if not calls.empty else None
+            self.put_line = ax.plot(puts['strike'], puts[plot_field], 'r-', label='Puts: --')[0] if not puts.empty else None
+            self.price_line = ax.axvline(x=self.data_processor.current_price, color='g', 
+                                       linestyle='--', label=f'Spot: ${self.data_processor.current_price:.2f}') if self.data_processor.current_price else None
             
-            if not calls.empty:
-                self.call_line = ax.plot(calls['strike'], calls[plot_field], 'b-', label='Calls')[0]
-            if not puts.empty:
-                self.put_line = ax.plot(puts['strike'], puts[plot_field], 'r-', label='Puts')[0]
-            
-            # Add current price line if available
-            if self.data_processor.current_price:
-                self.price_line = ax.axvline(x=self.data_processor.current_price, color='g', 
-                         linestyle='--', label=f'Current Price: ${self.data_processor.current_price:.2f}')
-            
-            # Get global min and max strike prices and set fixed x-axis limits
+            # Set x-axis limits
             min_strike, max_strike = self.data_processor.get_strike_range()
             if min_strike is not None and max_strike is not None:
-                # Add a small buffer (5%) on each side for better visualization
                 x_range = max_strike - min_strike
                 buffer = x_range * 0.05
                 ax.set_xlim(min_strike - buffer, max_strike + buffer)
             
-            # Format title and labels
+            # Set titles and labels
             expiry_date_str = current_date.strftime('%Y-%m-%d')
-            # Get DTE for the current expiration date
-            dte = df['DTE'].iloc[0] if not df.empty else "N/A"
+            today = pd.Timestamp.now().normalize()
+            dte = max(0, (current_date - today).days)
+            
             ax.set_title(f"{display_field} vs Strike Price - {expiry_date_str} (DTE: {dte})", fontsize=12, fontweight='bold')
             ax.set_xlabel('Strike Price ($)', fontsize=10)
+            ax.set_ylabel(f'{display_field} ($)' if display_field in self.PRICE_FIELDS else display_field, fontsize=10)
             
-            # Add dollar sign to y-axis label for price-related fields
-            price_fields = ["Spot", "Last Price", "Bid", "Ask", "Intrinsic Value", "Extrinsic Value"]
-            if display_field in price_fields:
-                ax.set_ylabel(f'{display_field} ($)', fontsize=10)
-            else:
-                ax.set_ylabel(display_field, fontsize=10)
+            # Create single legend
+            handles = [h for h in [self.call_line, self.put_line, self.price_line] if h is not None]
+            self.legend = ax.legend(handles=handles, loc='upper right')
             
-            # Create legend with initial entries
-            self.original_legend_elements = []
-            if self.call_line:
-                self.original_legend_elements.append(self.call_line)
-            if self.put_line:
-                self.original_legend_elements.append(self.put_line)
-            if self.price_line:
-                self.original_legend_elements.append(self.price_line)
-                
-            ax.legend(handles=self.original_legend_elements)
+            # Format axes
             ax.grid(True)
-            
-            # Format x-axis with dollar signs
-            def dollar_formatter(x, pos):
-                return f'${x:.0f}'
-                
-            ax.xaxis.set_major_formatter(FuncFormatter(dollar_formatter))
-            
-            # Format y-axis with dollar signs for price fields
-            if display_field in price_fields and display_field != "Volume":
+            ax.xaxis.set_major_formatter(FuncFormatter(self.dollar_formatter))
+            if display_field in self.PRICE_FIELDS and display_field != "Volume":
                 ax.yaxis.set_major_formatter(FuncFormatter(lambda y, pos: f'${y:.2f}'))
             
-            # Add crosshair functionality
-            # Create empty line objects for crosshairs
-            self.h_line = ax.axhline(y=0, color='gray', linestyle='--', alpha=0.7, visible=False)
-            self.v_line = ax.axvline(x=0, color='gray', linestyle='--', alpha=0.7, visible=False)
+            # Initialize crosshairs
+            self.h_line_call = ax.axhline(y=0, color='blue', linestyle='-', alpha=0.6, lw=1.0, visible=False)
+            self.h_line_put = ax.axhline(y=0, color='red', linestyle='-', alpha=0.6, lw=1.0, visible=False)
+            self.v_line = ax.axvline(x=0, color='gray', linestyle='-', alpha=0.8, lw=1.0, visible=False)
             
-            # Create crosshair legend entries (initially hidden)
-            self.strike_line = plt.Line2D([0], [0], color='gray', linestyle='--', alpha=0, label='Strike: $0.00')
-            self.value_line = plt.Line2D([0], [0], color='gray', linestyle='--', alpha=0, label=f'{display_field}: $0.00')
-            
-            # Store references to important objects for the mouse motion event
+            # Store references
             self.current_ax = ax
             self.current_display_field = display_field
-            self.is_price_field = display_field in price_fields
+            self.is_price_field = display_field in self.PRICE_FIELDS
             
-            # Draw the canvas once to create the renderer
+            # Pre-compute data for mouse movement
+            self._precompute_mouse_data(df, plot_field)
+            
+            # Initial draw and background capture
             self.canvas.draw()
-            # Save the background for blitting
             self.background = self.canvas.copy_from_bbox(ax.bbox)
             
-            # Connect the mouse motion event to the canvas
+            # Connect events (ensure single connection)
+            self.canvas.mpl_disconnect(self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move))
+            self.canvas.mpl_disconnect(self.canvas.mpl_connect('figure_leave_event', self.on_mouse_leave))
             self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
+            self.canvas.mpl_connect('figure_leave_event', self.on_mouse_leave)
             
             logger.info(f"Plot updated successfully for {display_field}")
             
         except Exception as e:
             logger.error(f"Error updating plot: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            self.show_loading_message(f"Error updating plot: {str(e)[:50]}...")
-    
+            self.status_label.config(text=f"Error updating plot: {str(e)[:30]}...")
+
+    def _precompute_mouse_data(self, df, plot_field):
+        """Pre-compute data for faster mouse movement handling"""
+        calls = df[df['option_type'] == 'call']
+        puts = df[df['option_type'] == 'put']
+        
+        self.call_data = (calls['strike'].values, calls[plot_field].values) if not calls.empty else (np.array([]), np.array([]))
+        self.put_data = (puts['strike'].values, puts[plot_field].values) if not puts.empty else (np.array([]), np.array([]))
+        
+        # Create lookup dictionaries
+        self.call_lookup = dict(zip(self.call_data[0], self.call_data[1]))
+        self.put_lookup = dict(zip(self.put_data[0], self.put_data[1]))
+
     def on_mouse_move(self, event):
-        """Handle mouse movement over the plot to update crosshairs"""
-        try:
-            # Only update if the mouse is over the plot area
-            if event.inaxes == self.current_ax:
-                # Get the current x and y values
-                x, y = event.xdata, event.ydata
-                
-                # Throttle updates to reduce lag
-                current_time = time.time()
-                if hasattr(self, 'last_crosshair_update') and current_time - self.last_crosshair_update < 0.05:
-                    # Skip this update if it's too soon after the last one (20 updates per second max)
-                    return
-                self.last_crosshair_update = current_time
-                
-                # Update crosshair positions
-                self.h_line.set_ydata(y)
-                self.v_line.set_xdata(x)
-                self.h_line.set_visible(True)
-                self.v_line.set_visible(True)
-                
-                # Format the values for display
-                if self.is_price_field:
-                    y_text = f'${y:.2f}'
-                else:
-                    y_text = f'{y:.0f}'
-                
-                # Update the crosshair legend entries
-                self.strike_line.set_alpha(1)
-                self.value_line.set_alpha(1)
-                self.strike_line.set_label(f'Strike: ${x:.2f}')
-                self.value_line.set_label(f'{self.current_display_field}: {y_text}')
-                
-                # Update the legend with crosshair values
-                legend_elements = self.original_legend_elements.copy()
-                legend_elements.extend([self.strike_line, self.value_line])
-                self.current_ax.legend(handles=legend_elements)
-                
-                # Use blit=True for faster rendering of specific artists
-                self.figure.canvas.restore_region(self.background)
-                self.current_ax.draw_artist(self.h_line)
-                self.current_ax.draw_artist(self.v_line)
-                self.figure.canvas.blit(self.current_ax.bbox)
-            else:
-                # Hide crosshairs when mouse leaves plot area
-                self.h_line.set_visible(False)
-                self.v_line.set_visible(False)
-                
-                # Reset legend to original
-                self.current_ax.legend(handles=self.original_legend_elements)
-                self.canvas.draw_idle()
-                
-        except Exception as e:
-            logger.error(f"Error in crosshair update: {str(e)}")
-            # Don't show error to user for crosshair issues
+        """Handle mouse movement with optimized performance"""
+        # Throttle to 2ms (500 FPS max)
+        current_time = time.time()
+        if current_time - getattr(self, 'last_crosshair_update', 0) < 0.002:
+            return
+        self.last_crosshair_update = current_time
+        
+        if event.inaxes != self.current_ax or event.xdata is None:
+            self._reset_crosshairs()
+            return
             
+        x = event.xdata
+        
+        # Find nearest strike using binary search
+        call_strikes, call_values = self.call_data
+        if len(call_strikes) > 0:
+            idx = np.searchsorted(call_strikes, x)
+            idx = min(max(0, idx-1), len(call_strikes)-1) if idx >= len(call_strikes) else idx
+            nearest_x = call_strikes[idx]
+            call_value = call_values[idx]
+            
+            # Direct lookup for put value
+            put_value = self.put_lookup.get(nearest_x)
+            
+            # Format values
+            fmt = f'${{:.2f}}' if self.is_price_field else '{:.0f}'
+            call_text = fmt.format(call_value) if call_value is not None else 'N/A'
+            put_text = fmt.format(put_value) if put_value is not None else 'N/A'
+            
+            # Update crosshairs
+            self.v_line.set_xdata([nearest_x])
+            self.h_line_call.set_ydata([call_value])
+            self.h_line_put.set_ydata([put_value]) if put_value is not None else None
+            
+            self.v_line.set_visible(True)
+            self.h_line_call.set_visible(True)
+            self.h_line_put.set_visible(put_value is not None)
+            
+            # Update legend (single instance)
+            texts = self.legend.get_texts()
+            if len(texts) > 0:
+                texts[0].set_text(f'Calls: {call_text}')
+            if len(texts) > 1:
+                texts[1].set_text(f'Puts: {put_text}')
+            
+            # Optimized redraw with blitting
+            self.canvas.restore_region(self.background)
+            self.current_ax.draw_artist(self.v_line)
+            self.current_ax.draw_artist(self.h_line_call)
+            if put_value is not None:
+                self.current_ax.draw_artist(self.h_line_put)
+            self.current_ax.draw_artist(self.legend)
+            self.canvas.blit(self.current_ax.bbox)
+        
+    def on_mouse_leave(self, event):
+        """Reset crosshairs and legend when mouse leaves"""
+        self._reset_crosshairs()
+
+    def _reset_crosshairs(self):
+        """Reset crosshairs and legend to default state"""
+        self.v_line.set_visible(False)
+        self.h_line_call.set_visible(False)
+        self.h_line_put.set_visible(False)
+        
+        texts = self.legend.get_texts()
+        if len(texts) > 0:
+            texts[0].set_text('Calls: --')
+        if len(texts) > 1:
+            texts[1].set_text('Puts: --')
+        
+        self.canvas.restore_region(self.background)
+        self.current_ax.draw_artist(self.legend)
+        self.canvas.blit(self.current_ax.bbox)
+
     def force_refresh_plot(self):
         """Force a refresh of the plot to ensure data is displayed correctly"""
         logger.info("Forcing plot refresh to ensure data is displayed")
         if self.data_loaded and hasattr(self, 'data_processor') and self.expiry_dates:
             self.update_plot()
         
-    def handle_fetch_timeout(self):
-        """Handle timeout during data fetching"""
-        logger.warning("Data fetch timeout reached")
-        self.search_button.config(state='normal')
-        self.config(cursor="")
-        messagebox.showwarning("Timeout", 
-            "Data fetching is taking too long. This may be due to rate limiting or network issues.\n\n"
-            "If partial data was loaded, you can still view it, or try again later.")
-        
-        # If we have partial data, try to display it
-        if hasattr(self, 'temp_data_processor') and hasattr(self, 'temp_expiry_dates'):
-            logger.info("Using partial data after timeout")
-            self.data_processor = self.temp_data_processor
-            self.expiry_dates = self.temp_expiry_dates
-            self.current_expiry_index = 0
-            self.update_expiry_display()
-            self.update_plot()
-            
-            # Store the current ticker and update time
-            self.current_ticker = self.ticker_entry.get()
-            self.last_update_time = time.time()
-            current_time = time.strftime("%H:%M:%S", time.localtime(self.last_update_time))
-            self.status_label.config(text=f"Partial data updated: {current_time}")
-            
-            # Mark data as loaded
-            self.data_loaded = True
 
 if __name__ == "__main__":
     app = OptionsVisualizerApp()

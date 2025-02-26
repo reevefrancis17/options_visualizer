@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import xarray as xr
+from scipy.interpolate import griddata
 from datetime import datetime
 import logging
 import traceback
@@ -24,6 +25,8 @@ class OptionsDataProcessor:
         self.min_strike = None
         self.max_strike = None
         self.ds = self._process_data()
+        if self.ds is not None:
+            self.interpolate_missing_values_2d()
 
     def _process_data(self):
         """
@@ -292,3 +295,60 @@ class OptionsDataProcessor:
         except Exception as e:
             logger.error(f"Error getting data for expiry {expiry_date}: {str(e)}")
             return None
+        
+    def interpolate_missing_values_2d(self):
+        """
+        Interpolate missing values in the dataset using 2D linear interpolation.
+        This fills gaps in the options chain for better visualization.
+        """
+        if self.ds is None:
+            logger.error("Cannot interpolate: No dataset available")
+            return
+            
+        try:
+            logger.info("Starting 2D interpolation of missing values")
+            
+            # Identify numeric variables
+            numeric_vars = [var for var in self.ds.data_vars if np.issubdtype(self.ds[var].dtype, np.number)]
+            logger.info(f"Interpolating numeric variables: {numeric_vars}")
+            
+            # Loop over option types and variables
+            for opt_type in ['call', 'put']:
+                for variable in numeric_vars:
+                    # Extract 2D DataArray for this option type and variable
+                    da = self.ds[variable].sel(option_type=opt_type)
+                    
+                    # Check if there are any NaNs to interpolate
+                    if da.isnull().any():
+                        strikes = da.strike.values
+                        dtes = da.DTE.values
+                        
+                        # Create a 2D grid of coordinates
+                        strike_grid, dte_grid = np.meshgrid(strikes, dtes, indexing='ij')
+                        points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
+                        
+                        # Flatten the data values
+                        values_flat = da.values.ravel()
+                        non_nan = ~np.isnan(values_flat)
+                        
+                        # If there are non-NaN values to base interpolation on
+                        if non_nan.sum() > 0:
+                            points_known = points[non_nan]  # Coordinates of known values
+                            values_known = values_flat[non_nan]  # Known values
+                            
+                            # Perform 2D interpolation over the entire grid
+                            interpolated_values = griddata(
+                                points_known, values_known, (strike_grid, dte_grid), method='linear'
+                            )
+                            
+                            # Update the DataArray with interpolated values
+                            da.values = interpolated_values
+                            logger.info(f"Interpolated {variable} for {opt_type}")
+                        else:
+                            logger.warning(f"No data available for {variable} {opt_type}, cannot interpolate")
+            
+            logger.info("Completed 2D interpolation")
+            
+        except Exception as e:
+            logger.error(f"Error during interpolation: {str(e)}")
+            logger.error(traceback.format_exc())
