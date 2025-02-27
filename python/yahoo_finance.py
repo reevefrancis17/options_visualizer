@@ -23,6 +23,13 @@ class YahooFinanceAPI:
                 return data, price
         return None, None
 
+    def get_risk_free_rate(self, ticker):
+        """Get the risk-free rate."""
+        treasury = yf.Ticker("^TNX")
+        # Get the most recent yield (adjusted close price)
+        risk_free_rate = treasury.history(period="1d")["Close"].iloc[-1] / 100
+        return risk_free_rate
+
     def get_options_data(self, ticker, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None, max_dates=None):
         """
         Fetch options data for a ticker with progressive loading support
@@ -59,14 +66,42 @@ class YahooFinanceAPI:
                 stock = yf.Ticker(ticker)
                 
                 # Get current price
-                info = stock.info
-                if not isinstance(info, dict) or 'regularMarketPrice' not in info:
-                    if 'currentPrice' not in info:
+                try:
+                    info = stock.info
+                    if not isinstance(info, dict):
+                        logger.warning(f"Unexpected info type for {ticker}: {type(info)}")
+                        # Try to get price from history as a fallback
+                        hist = stock.history(period="1d")
+                        if not hist.empty:
+                            current_price = hist['Close'].iloc[-1]
+                            logger.info(f"Got current price from history for {ticker}: {current_price}")
+                        else:
+                            raise ValueError("Could not get current price from history")
+                    elif 'regularMarketPrice' in info:
+                        current_price = info['regularMarketPrice']
+                    elif 'currentPrice' in info:
+                        current_price = info['currentPrice']
+                    elif 'previousClose' in info:
+                        # Use previous close as a last resort
+                        current_price = info['previousClose']
+                        logger.warning(f"Using previousClose as current price for {ticker}: {current_price}")
+                    else:
                         logger.error(f"Missing price data in info for {ticker}")
                         raise ValueError("Could not get current price")
-                    current_price = info['currentPrice']
-                else:
-                    current_price = info['regularMarketPrice']
+                except Exception as price_error:
+                    logger.error(f"Error getting price for {ticker}: {str(price_error)}")
+                    # Try to get price from history as a fallback
+                    try:
+                        hist = stock.history(period="1d")
+                        if not hist.empty:
+                            current_price = hist['Close'].iloc[-1]
+                            logger.info(f"Got current price from history for {ticker}: {current_price}")
+                        else:
+                            raise ValueError("Could not get current price from history")
+                    except Exception as hist_error:
+                        logger.error(f"Error getting price from history for {ticker}: {str(hist_error)}")
+                        raise ValueError("Could not get current price")
+                
                 logger.info(f"Got current price for {ticker}: {current_price}")
                 
                 # Call the progress callback with just the price if provided

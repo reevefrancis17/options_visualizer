@@ -13,8 +13,10 @@ import logging
 import time
 import os
 import threading
-from yahoo_finance import YahooFinanceAPI
-from options_data import OptionsDataProcessor
+import sys
+# Add the parent directory to sys.path to enable absolute imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from python.options_data import OptionsDataManager, OptionsDataProcessor
 import traceback
 
 # Clear the log file at startup
@@ -64,7 +66,7 @@ class OptionsVisualizerApp(tk.Tk):
         self.minsize(1000, 600)    # Set minimum window size
         
         logger.info("Initializing Options Visualizer App")
-        self.api = YahooFinanceAPI()
+        self.api = OptionsDataManager()
         self.data_processor = None
         self.expiry_dates = []
         self.current_expiry_index = 0
@@ -234,77 +236,26 @@ class OptionsVisualizerApp(tk.Tk):
         self.status_label.config(text=f"Loading: {progress_pct}% ({processed_dates}/{total_dates})")
         
         try:
-            # Process the partial data
-            temp_processor = OptionsDataProcessor(partial_data, current_price)
-            expiry_dates = temp_processor.get_expirations()
-            
-            if not expiry_dates:
+            # The OptionsDataManager will create a processor with the partial data
+            # We don't need to create it here, but we still need to check if we have data
+            if processed_dates == 0:
                 return
                 
-            # Store temporary data
-            self.temp_data_processor = temp_processor
-            self.temp_expiry_dates = expiry_dates
-            
-            # If this is the first time we're getting data, update the UI
+            # If this is the first time we're getting data and we have enough to display,
+            # we can request a full update from the data manager in the next cycle
             if not hasattr(self, 'data_processor') or not self.data_loaded:
-                self.update_with_temp_data()
-            # If we already have data displayed but got more dates, update the expiry display
-            elif len(expiry_dates) > len(self.expiry_dates):
-                # Only update if we have more dates than before
-                self.expiry_dates = expiry_dates
-                self.update_expiry_display()
-                
-                # Update status with new date count
-                current_dates = len(self.expiry_dates)
-                self.status_label.config(text=f"Loading: {progress_pct}% ({current_dates} dates so far)")
-                
-                # Enable navigation if we have at least 2 dates
-                if len(self.expiry_dates) >= 2:
-                    self.next_button.config(state=tk.NORMAL)
-                
-                # Re-apply interpolation with the updated data
-                if hasattr(self, 'data_processor') and self.data_processor is not None:
-                    logger.info("Re-applying interpolation with updated data")
-                    self.data_processor.interpolate_missing_values_2d()
+                if processed_dates >= 1:  # If we have at least one date processed
+                    # Update status to show we're preparing to display data
+                    self.status_label.config(text=f"Preparing data ({processed_dates}/{total_dates})...")
+            
+            # Update status with progress
+            self.status_label.config(text=f"Loading: {progress_pct}% ({processed_dates}/{total_dates})")
+            
         except Exception as e:
             logger.error(f"Error processing partial data: {str(e)}")
             # Continue loading - don't interrupt the process for partial data errors
     
-    def update_with_temp_data(self):
-        """Update the UI with temporary data while loading continues"""
-        if not hasattr(self, 'temp_data_processor') or not hasattr(self, 'temp_expiry_dates'):
-            return
-            
-        try:
-            # Use temporary data as current data
-            self.data_processor = self.temp_data_processor
-            self.expiry_dates = self.temp_expiry_dates
-            self.current_expiry_index = 0  # Default to first expiry date
-            
-            # Apply interpolation to the temporary data
-            logger.info("Applying interpolation to temporary data")
-            self.data_processor.interpolate_missing_values_2d()
-            
-            # Update UI
-            self.update_expiry_display()
-            self.update_plot()
-            
-            # Enable navigation if we have at least 2 dates
-            if len(self.expiry_dates) >= 2:
-                self.next_button.config(state=tk.NORMAL)
-            
-            # Update status to indicate more data is loading
-            current_dates = len(self.expiry_dates)
-            self.status_label.config(text=f"Loading: {current_dates} dates so far...")
-            
-            # Mark data as partially loaded to enable functionality
-            self.data_loaded = True
-            
-        except Exception as e:
-            logger.error(f"Error updating with temporary data: {str(e)}")
-            logger.error(traceback.format_exc())
-    
-    def update_with_complete_data(self, ticker, options_data, current_price):
+    def update_with_complete_data(self, ticker, processor):
         """Update the UI with complete data after loading is finished"""
         try:
             # Reset UI state at the end regardless of outcome
@@ -313,14 +264,14 @@ class OptionsVisualizerApp(tk.Tk):
                 self.config(cursor="")
             
             # Check if we have data
-            if not options_data:
+            if not processor:
                 logger.error(f"No options data available for {ticker}")
                 self.status_label.config(text="No data available")
                 reset_ui()
                 return
                 
-            logger.info(f"Creating OptionsDataProcessor for {ticker}")
-            self.data_processor = OptionsDataProcessor(options_data, current_price)
+            logger.info(f"Using OptionsDataProcessor for {ticker}")
+            self.data_processor = processor
             ds = self.data_processor.get_data()
             
             # Check if dataset is valid
@@ -342,10 +293,6 @@ class OptionsVisualizerApp(tk.Tk):
             # Default to first expiry date (lowest DTE)
             self.current_expiry_index = 0
             logger.info(f"Setting to lowest DTE expiry: {self.expiry_dates[0]}")
-            
-            # Re-apply interpolation one final time with all data
-            logger.info("Applying final interpolation with complete data")
-            self.data_processor.interpolate_missing_values_2d()
             
             # Update UI
             self.update_expiry_display()
@@ -408,19 +355,19 @@ class OptionsVisualizerApp(tk.Tk):
             # Record start time for progress estimation
             self.last_update_time = time.time()
             
-            # Fetch data from Yahoo Finance with progressive loading
+            # Fetch data using the data manager with progressive loading
             logger.info(f"Fetching options data for {ticker}")
-            options_data, current_price = self.api.get_options_data(ticker, 
-                                                                   self.update_with_partial_data)
+            processor, current_price = self.api.get_options_data(ticker, 
+                                                               progress_callback=self.update_with_partial_data)
             
             # Use after to update UI from the main thread
-            if options_data is None or current_price is None:
+            if processor is None or current_price is None:
                 logger.error(f"Failed to fetch data for {ticker}")
                 self.after(0, lambda: self._handle_fetch_error(ticker, "Failed to fetch data"))
                 return
             
             # Final update with complete data (using after to ensure it runs in the main thread)
-            self.after(0, lambda: self.update_with_complete_data(ticker, options_data, current_price))
+            self.after(0, lambda: self.update_with_complete_data(ticker, processor))
             
         except Exception as e:
             error_msg = str(e)
@@ -440,42 +387,40 @@ class OptionsVisualizerApp(tk.Tk):
             messagebox.showerror("Error", 
                 f"An error occurred while fetching data for {ticker}: {error_msg}")
         
-        # If we have partial data, try to display it
-        if hasattr(self, 'temp_data_processor') and hasattr(self, 'temp_expiry_dates'):
-            logger.info("Using partial data after error")
+        # Try to get any cached data from the data manager
+        try:
+            # Check if we have a processor in the data manager's cache
+            processor, current_price = self.api.get_options_data(ticker)
             
-            # Use temporary data as current data
-            self.data_processor = self.temp_data_processor
-            self.expiry_dates = self.temp_expiry_dates
-            self.current_expiry_index = 0
-            
-            # Apply interpolation to the partial data
-            logger.info("Applying interpolation to partial data after error")
-            try:
-                self.data_processor.interpolate_missing_values_2d()
-            except Exception as e:
-                logger.error(f"Error applying interpolation after fetch error: {str(e)}")
-                logger.error(traceback.format_exc())
-            
-            # Update UI
-            self.update_expiry_display()
-            self.update_plot()
-            
-            # Enable navigation if we have at least 2 dates
-            if len(self.expiry_dates) >= 2:
-                self.next_button.config(state=tk.NORMAL)
-            
-            # Store the current ticker and update time
-            self.current_ticker = ticker
-            self.last_update_time = time.time()
-            current_time = time.strftime("%H:%M:%S", time.localtime(self.last_update_time))
-            
-            # Update status with partial data info
-            total_dates = len(self.expiry_dates)
-            self.status_label.config(text=f"Partial data: {current_time} | {total_dates} dates")
-            
-            # Mark data as loaded
-            self.data_loaded = True
+            if processor is not None:
+                logger.info("Using cached data after error")
+                
+                # Use the processor
+                self.data_processor = processor
+                self.expiry_dates = self.data_processor.get_expirations()
+                self.current_expiry_index = 0
+                
+                # Update UI
+                self.update_expiry_display()
+                self.update_plot()
+                
+                # Enable navigation if we have at least 2 dates
+                if len(self.expiry_dates) >= 2:
+                    self.next_button.config(state=tk.NORMAL)
+                
+                # Store the current ticker and update time
+                self.current_ticker = ticker
+                self.last_update_time = time.time()
+                current_time = time.strftime("%H:%M:%S", time.localtime(self.last_update_time))
+                
+                # Update status with partial data info
+                total_dates = len(self.expiry_dates)
+                self.status_label.config(text=f"Cached data: {current_time} | {total_dates} dates")
+                
+                # Mark data as loaded
+                self.data_loaded = True
+        except Exception as e:
+            logger.error(f"Error trying to use cached data: {str(e)}")
         
         # Reset UI state
         self.search_button.config(state='normal')

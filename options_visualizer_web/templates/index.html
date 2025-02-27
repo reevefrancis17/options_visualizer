@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Options Visualizer</title>
+    <!-- Plotly.js for interactive charts -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Options Visualizer</h1>
+        </header>
+        
+        <div class="controls-section">
+            <div class="search-section">
+                <div class="ticker-input">
+                    <label for="ticker">Ticker:</label>
+                    <input type="text" id="ticker" placeholder="Enter stock symbol (e.g., SPY)">
+                    <button id="search-btn">Search</button>
+                </div>
+                <div class="status">
+                    <span id="status-label">Not updated yet</span>
+                </div>
+            </div>
+            
+            <div class="navigation-section">
+                <button id="prev-btn" disabled>◀</button>
+                <span id="expiry-label">No data</span>
+                <button id="next-btn" disabled>▶</button>
+            </div>
+            
+            <div class="plot-options">
+                <fieldset>
+                    <legend>Plot Type</legend>
+                    <label><input type="radio" name="plot-type" value="Spot" checked> Spot</label>
+                    <label><input type="radio" name="plot-type" value="Bid"> Bid</label>
+                    <label><input type="radio" name="plot-type" value="Ask"> Ask</label>
+                    <label><input type="radio" name="plot-type" value="Volume"> Volume</label>
+                    <label><input type="radio" name="plot-type" value="Intrinsic Value"> Intrinsic Value</label>
+                    <label><input type="radio" name="plot-type" value="Extrinsic Value"> Extrinsic Value</label>
+                </fieldset>
+            </div>
+        </div>
+        
+        <div id="loading-indicator" class="hidden">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+        </div>
+        
+        <div id="plot-container">
+            <div id="options-plot"></div>
+        </div>
+        
+        <div id="error-message" class="hidden"></div>
+    </div>
+    
+    <!-- Custom JavaScript -->
+    <script src="/static/js/main.js"></script>
+</body>
+</html> 

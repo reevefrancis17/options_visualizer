@@ -1,0 +1,221 @@
+/* Base styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f4f4f4;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100vh;
+    margin: 0;
+    background-color: #fff;
+    padding: 10px;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 10px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #ddd;
+    flex: 0 0 auto;
+}
+
+h1 {
+    color: #2c3e50;
+}
+
+/* Controls section */
+.controls-section {
+    flex: 0 0 auto;
+    margin-bottom: 10px;
+}
+
+/* Search section */
+.search-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 5px 0;
+}
+
+.ticker-input {
+    display: flex;
+    align-items: center;
+}
+
+.ticker-input label {
+    margin-right: 10px;
+    font-weight: bold;
+}
+
+.ticker-input input {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-right: 10px;
+    width: 120px;
+}
+
+.ticker-input button {
+    padding: 8px 15px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.ticker-input button:hover {
+    background-color: #2980b9;
+}
+
+.ticker-input button:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+}
+
+.status {
+    font-size: 0.9em;
+    color: #7f8c8d;
+}
+
+/* Navigation section */
+.navigation-section {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.navigation-section button {
+    padding: 5px 10px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.navigation-section button:hover {
+    background-color: #2980b9;
+}
+
+.navigation-section button:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+}
+
+.navigation-section span {
+    margin: 0 15px;
+    font-weight: bold;
+    min-width: 100px;
+    text-align: center;
+}
+
+/* Plot options */
+.plot-options {
+    margin-bottom: 20px;
+}
+
+.plot-options fieldset {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+}
+
+.plot-options legend {
+    padding: 0 10px;
+    font-weight: bold;
+}
+
+.plot-options label {
+    margin-right: 15px;
+    cursor: pointer;
+}
+
+/* Plot container */
+#plot-container {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    margin-bottom: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+#options-plot {
+    width: 100%;
+    height: 100%;
+}
+
+/* Loading indicator */
+#loading-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+}
+
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #3498db;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 2s linear infinite;
+    margin-bottom: 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Error message */
+#error-message {
+    padding: 10px;
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    margin-bottom: 20px;
+}
+
+/* Utility classes */
+.hidden {
+    display: none !important;
+} 
