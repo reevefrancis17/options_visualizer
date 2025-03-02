@@ -1,4 +1,3 @@
-# options_data.py
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -6,22 +5,23 @@ from scipy.interpolate import griddata
 from datetime import datetime
 import logging
 import traceback
-import sys
-import time
 import os
-from typing import Dict, Any, Optional, Callable, Tuple, List, Union
+import time
+import threading
+from typing import Dict, Optional, Callable, Tuple, List, Any
 
 # Import the finance API and models
 from python.yahoo_finance import YahooFinanceAPI
 from python.models.black_scholes import (
     call_price, put_price, delta, gamma, theta, vega, rho, implied_volatility
 )
+from python.cache_manager import OptionsCache
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
 # Clear error logs if they exist
-log_dir = os.path.join(os.path.dirname(__file__), 'debug')
+log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug', 'logs')
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 error_log = os.path.join(log_dir, 'error_log.txt')
@@ -30,153 +30,142 @@ if os.path.exists(error_log):
         f.write(f"=== New session started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
 class OptionsDataManager:
-    """
-    Central manager for options data handling.
-    Interfaces with data sources (Yahoo Finance, etc.) and financial models (Black-Scholes, etc.).
-    Provides a unified API for applications to access options data.
-    """
-    # Available data sources
+    """Central manager for options data handling."""
     DATA_SOURCE_YAHOO = "yahoo"
-    # Available pricing models
     MODEL_BLACK_SCHOLES = "black_scholes"
-    MODEL_MARKET = "market"  # Use market prices directly
-    
+    MODEL_MARKET = "market"
+
     def __init__(self, data_source=DATA_SOURCE_YAHOO, pricing_model=MODEL_MARKET, cache_duration=600):
-        """
-        Initialize the options data manager.
-        
-        Args:
-            data_source: The data source to use (default: yahoo)
-            pricing_model: The pricing model to use (default: market)
-            cache_duration: Cache duration in seconds (default: 600)
-        """
         logger.info(f"Initializing OptionsDataManager with source={data_source}, model={pricing_model}")
         self.data_source = data_source
         self.pricing_model = pricing_model
         self.cache_duration = cache_duration
+        self.api = YahooFinanceAPI(cache_duration=cache_duration) if data_source == self.DATA_SOURCE_YAHOO else None
+        self._cache = OptionsCache(cache_duration=cache_duration)
+        self._loading_state = {}
+        self._fetch_locks = {}
         
-        # Initialize data source APIs
-        if data_source == self.DATA_SOURCE_YAHOO:
-            self.api = YahooFinanceAPI(cache_duration=cache_duration)
-        else:
-            raise ValueError(f"Unsupported data source: {data_source}")
+        # Run cache maintenance on startup
+        self._cache.maintenance()
+
+    def get_current_processor(self, ticker: str) -> Tuple[Optional['OptionsDataProcessor'], Optional[float], str, float]:
+        """Get the current processor from cache with its status."""
+        # Get data from SQLite cache
+        options_data, current_price, status, progress, processed_dates, total_dates = self._cache.get(ticker)
         
-        # Cache for processed data
-        self._processor_cache = {}
-    
-    def get_options_data(self, ticker: str, 
-                        progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None,
-                        max_dates: Optional[int] = None) -> Tuple['OptionsDataProcessor', float]:
-        """
-        Get options data for a ticker.
+        if status != 'not_found' and options_data and current_price:
+            try:
+                # Create processor from cached data
+                processor = OptionsDataProcessor(options_data, current_price)
+                return processor, current_price, status, progress
+            except Exception as e:
+                logger.error(f"Error creating processor from cached data for {ticker}: {str(e)}")
         
-        Args:
-            ticker: The stock ticker symbol
-            progress_callback: Optional callback for progress updates
-            max_dates: Maximum number of expiration dates to fetch
-            
+        # If we get here, either cache miss or error creating processor
+        return None, None, 'not_found', 0
+
+    def start_fetching(self, ticker: str) -> bool:
+        """Start fetching data in the background if not already loading.
+        
         Returns:
-            Tuple of (OptionsDataProcessor, current_price)
+            bool: True if fetching started, False if already in progress
         """
-        # Check processor cache first
-        if ticker in self._processor_cache:
-            processor, price, timestamp = self._processor_cache[ticker]
-            if time.time() - timestamp < self.cache_duration:
-                logger.info(f"Using cached processor for {ticker}")
-                # Call the callback with complete data if provided
-                if progress_callback:
-                    progress_callback(processor.options_data, price, 
-                                     len(processor.get_expirations()), 
-                                     len(processor.get_expirations()))
-                return processor, price
-        
-        # Fetch raw data from the selected data source
-        logger.info(f"Fetching options data for {ticker} from {self.data_source}")
-        
-        # Create a wrapper for the progress callback to update our cache incrementally
-        def cache_update_callback(partial_data, current_price, processed_dates, total_dates):
-            # Only process if we have some data
-            if partial_data and current_price and processed_dates > 0:
-                try:
-                    # Create a temporary processor with partial data
-                    temp_processor = OptionsDataProcessor(partial_data, current_price)
-                    # Update the cache with this partial data
-                    self._processor_cache[ticker] = (temp_processor, current_price, time.time())
-                except Exception as e:
-                    logger.error(f"Error creating temporary processor: {str(e)}")
+        # Use a lock to prevent multiple threads from starting fetches for the same ticker
+        if ticker not in self._fetch_locks:
+            self._fetch_locks[ticker] = threading.Lock()
             
-            # Forward the callback to the original progress_callback if provided
-            if progress_callback:
-                progress_callback(partial_data, current_price, processed_dates, total_dates)
-        
-        # Fetch the data
-        options_data, current_price = self.api.get_options_data(
-            ticker, 
-            progress_callback=cache_update_callback if progress_callback else None,
-            max_dates=max_dates
-        )
-        
-        if options_data is None or current_price is None:
-            logger.error(f"Failed to fetch data for {ticker}")
-            return None, None
-        
-        # Create the processor with the fetched data
+        with self._fetch_locks[ticker]:
+            if ticker in self._loading_state:
+                logger.info(f"Fetch already in progress for {ticker}")
+                return False
+                
+            self._loading_state[ticker] = {'last_processed_dates': 0, 'total_dates': 0}
+            thread = threading.Thread(target=self._fetch_in_background, args=(ticker,))
+            thread.daemon = True  # Make thread exit when main thread exits
+            thread.start()
+            logger.info(f"Started background fetch for {ticker}")
+            return True
+
+    def _fetch_in_background(self, ticker: str):
+        """Fetch data in a background thread."""
         try:
-            processor = OptionsDataProcessor(options_data, current_price)
-            # Cache the processor
-            self._processor_cache[ticker] = (processor, current_price, time.time())
-            return processor, current_price
-        except Exception as e:
-            logger.error(f"Error creating options data processor: {str(e)}")
-            return None, None
-    
-    def get_risk_free_rate(self):
-        """Get the risk-free rate."""
-        api = YahooFinanceAPI()
-        return api.get_risk_free_rate("^TNX")
-    
-    def calculate_option_price(self, S: float, K: float, T: float, r: float, 
-                              sigma: float, option_type: str) -> float:
-        """
-        Calculate option price using the selected pricing model.
-        
-        Args:
-            S: Current stock price
-            K: Strike price
-            T: Time to expiration in years
-            r: Risk-free rate
-            sigma: Volatility
-            option_type: 'call' or 'put'
-            
-        Returns:
-            Option price
-        """
-        if self.pricing_model == self.MODEL_BLACK_SCHOLES:
-            if option_type == 'call':
-                return call_price(S, K, T, r, sigma)
-            elif option_type == 'put':
-                return put_price(S, K, T, r, sigma)
+            def cache_update_callback(partial_data, current_price, processed_dates, total_dates):
+                # Update the cache even with minimal data (just one date)
+                if partial_data and current_price:
+                    try:
+                        self._loading_state[ticker]['last_processed_dates'] = processed_dates
+                        self._loading_state[ticker]['total_dates'] = total_dates
+                        
+                        # Update SQLite cache with partial data
+                        self._cache.set(ticker, partial_data, current_price, processed_dates, total_dates)
+                        
+                        logger.info(f"Updated cache with partial data for {ticker} ({processed_dates}/{total_dates} dates)")
+                    except Exception as e:
+                        logger.error(f"Error in background cache update: {str(e)}")
+
+            options_data, current_price = self.api.get_options_data(ticker, progress_callback=cache_update_callback)
+            if options_data and current_price:
+                try:
+                    # Update SQLite cache with complete data
+                    processed_dates = len(options_data)
+                    total_dates = processed_dates  # All dates are processed
+                    self._cache.set(ticker, options_data, current_price, processed_dates, total_dates)
+                    
+                    logger.info(f"Completed fetching and cached data for {ticker}")
+                except Exception as e:
+                    logger.error(f"Error processing complete data: {str(e)}")
             else:
-                raise ValueError(f"Unsupported option type: {option_type}")
-        else:
-            raise ValueError(f"Unsupported pricing model for calculation: {self.pricing_model}")
-    
-    def calculate_greeks(self, S: float, K: float, T: float, r: float, 
-                        sigma: float, option_type: str) -> Dict[str, float]:
-        """
-        Calculate option Greeks using the selected pricing model.
+                logger.error(f"Failed to fetch data for {ticker}")
+        except Exception as e:
+            logger.error(f"Error in background fetch for {ticker}: {str(e)}")
+        finally:
+            # Clean up loading state when done
+            if ticker in self._loading_state:
+                del self._loading_state[ticker]
+
+    def get_options_data(self, ticker: str, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None,
+                         max_dates: Optional[int] = None) -> Tuple[Optional['OptionsDataProcessor'], Optional[float]]:
+        """Get options data with support for immediate cache return and background fetching.
         
-        Args:
-            S: Current stock price
-            K: Strike price
-            T: Time to expiration in years
-            r: Risk-free rate
-            sigma: Volatility
-            option_type: 'call' or 'put'
-            
+        This method will:
+        1. Return cached data immediately if available
+        2. Start a background fetch if no cache is available
+        3. Call progress_callback with the current state
+        
         Returns:
-            Dictionary of Greeks (delta, gamma, theta, vega, rho)
+            Tuple of (processor, price) - may be (None, None) if no cache and fetch just started
         """
+        # Check cache first
+        processor, price, status, progress = self.get_current_processor(ticker)
+        
+        # If we have cached data (partial or complete), return it immediately
+        if status != 'not_found':
+            if progress_callback and processor:
+                # Call progress callback with current state
+                expiry_count = len(processor.get_expirations())
+                
+                # Get total count from cache or loading state
+                _, _, _, _, processed_dates, total_dates = self._cache.get(ticker)
+                total_count = total_dates if total_dates > 0 else expiry_count
+                
+                progress_callback(processor.options_data, price, expiry_count, total_count)
+            return processor, price
+            
+        # No cache available, start background fetch
+        self.start_fetching(ticker)
+        
+        # Return None to indicate fetch has started but no data available yet
+        return None, None
+
+    def get_risk_free_rate(self):
+        return YahooFinanceAPI().get_risk_free_rate("^TNX")
+
+    def calculate_option_price(self, S: float, K: float, T: float, r: float, sigma: float, option_type: str) -> float:
+        if self.pricing_model == self.MODEL_BLACK_SCHOLES:
+            return call_price(S, K, T, r, sigma) if option_type == 'call' else put_price(S, K, T, r, sigma)
+        raise ValueError(f"Unsupported pricing model: {self.pricing_model}")
+
+    def calculate_greeks(self, S: float, K: float, T: float, r: float, sigma: float, option_type: str) -> Dict[str, float]:
         if self.pricing_model == self.MODEL_BLACK_SCHOLES:
             return {
                 'delta': delta(S, K, T, r, sigma, option_type),
@@ -185,490 +174,209 @@ class OptionsDataManager:
                 'vega': vega(S, K, T, r, sigma),
                 'rho': rho(S, K, T, r, sigma, option_type)
             }
-        else:
-            raise ValueError(f"Unsupported pricing model for Greeks: {self.pricing_model}")
-    
-    def calculate_implied_volatility(self, market_price: float, S: float, K: float, 
-                                   T: float, r: float, option_type: str) -> float:
-        """
-        Calculate implied volatility from market price.
-        
-        Args:
-            market_price: Market price of the option
-            S: Current stock price
-            K: Strike price
-            T: Time to expiration in years
-            r: Risk-free rate
-            option_type: 'call' or 'put'
-            
-        Returns:
-            Implied volatility
-        """
+        raise ValueError(f"Unsupported pricing model: {self.pricing_model}")
+
+    def calculate_implied_volatility(self, market_price: float, S: float, K: float, T: float, r: float, option_type: str) -> float:
         return implied_volatility(market_price, S, K, T, r, option_type)
 
-
 class OptionsDataProcessor:
-    """
-    Processes raw options data from data sources.
-    Calculates additional metrics and stores data in an xarray Dataset for easy slicing and analysis.
-    """
+    """Processes raw options data into an xarray Dataset."""
     def __init__(self, options_data, current_price):
-        """
-        Initializes the processor with raw options data and current stock price.
-        """
         logger.info(f"Initializing OptionsDataProcessor with current_price: {current_price}")
         self.options_data = options_data
         self.current_price = current_price
         self.min_strike = None
         self.max_strike = None
-        if self.options_data is None:
+        if not options_data:
             logger.error("Failed to fetch options.")
             raise ValueError("Options data is None")
-        
-        try:
-            self.ds = self.pre_process_data()
-            
-            # Try to interpolate, but continue even if it fails
-            try:
-                self.interpolate_missing_values_2d()
-            except Exception as e:
-                logger.error(f"Interpolation failed but continuing: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-            
-            self.post_process_data()
-            self.risk_free_rate = self.get_risk_free_rate()
-        except Exception as e:
-            logger.error(f"Error in OptionsDataProcessor initialization: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            raise
+        self.ds = self.pre_process_data()
+        num_dates = len(self.get_expirations())
+        if num_dates == 1:
+            self.interpolate_missing_values_1d()
+        elif num_dates >= 2:
+            self.interpolate_missing_values_2d()
+        self.post_process_data()
+        self.risk_free_rate = self.get_risk_free_rate()
 
     def pre_process_data(self):
-        """
-        Processes raw options data into an xarray Dataset with calculated metrics.
-        Core dimensions: strike, DTE (days to expiry), option_type (call/put)
-        """
-        try:
-            if not self.options_data or not self.current_price:
-                logger.error("Missing required data for processing")
-                return None
-
-            logger.info(f"Processing options data with current price: {self.current_price}")
-            
-            # First, process data into a pandas DataFrame as before
-            dfs = []
-            now = pd.Timestamp.now().normalize()  # Normalize to start of day to fix DTE calculation
-            
-            # Process each expiration date
-            for exp, data in self.options_data.items():
-                logger.info(f"Processing data for expiration date: {exp}")
-                exp_date = pd.to_datetime(exp).normalize()  # Normalize to start of day
-                # Calculate DTE, ensuring today's options show 0 DTE
-                dte = max(0, (exp_date - now).days)
-                
-                if 'calls' in data and not data['calls'].empty:
-                    # Reduce logging verbosity for better performance
-                    calls_count = len(data['calls'])
-                    if calls_count > 0:
-                        logger.info(f"Processing {calls_count} call options for {exp}")
-                        calls = data['calls'].copy()
-                        calls['option_type'] = 'call'
-                        calls['expiration'] = exp_date
-                        calls['DTE'] = dte
-                        dfs.append(calls)
-                
-                if 'puts' in data and not data['puts'].empty:
-                    # Reduce logging verbosity for better performance
-                    puts_count = len(data['puts'])
-                    if puts_count > 0:
-                        logger.info(f"Processing {puts_count} put options for {exp}")
-                        puts = data['puts'].copy()
-                        puts['option_type'] = 'put'
-                        puts['expiration'] = exp_date
-                        puts['DTE'] = dte
-                        dfs.append(puts)
-
-            if not dfs:
-                logger.error("No valid data to process")
-                return None
-
-            # Combine data
-            df = pd.concat(dfs, ignore_index=True)
-            logger.info(f"Combined data shape: {df.shape}")
-            
-            # Calculate additional metrics
-            logger.info("Calculating additional metrics")
-            
-            # Calculate spot price (mean of bid and ask)
-            df['spot'] = (df['bid'] + df['ask']) / 2
-            
-            # Use spot as the default price
-            df['price'] = df['spot']
-            
-            # Calculate intrinsic value - vectorized for better performance
-            mask_call = df['option_type'] == 'call'
-            df.loc[mask_call, 'intrinsic_value'] = np.maximum(0, self.current_price - df.loc[mask_call, 'strike'])
-            df.loc[~mask_call, 'intrinsic_value'] = np.maximum(0, df.loc[~mask_call, 'strike'] - self.current_price)
-            
-            # Calculate extrinsic value as the residue
-            df['extrinsic_value'] = df['price'] - df['intrinsic_value']
-            
-            # Calculate min and max strike prices across all expirations
-            self.min_strike = df['strike'].min()
-            self.max_strike = df['strike'].max()
-            
-            # Log some statistics
-            logger.info(f"Price range: {df['price'].min():.2f} to {df['price'].max():.2f}")
-            logger.info(f"Strike range: {self.min_strike:.2f} to {self.max_strike:.2f}")
-            logger.info(f"DTE range: {df['DTE'].min()} to {df['DTE'].max()}")
-            
-            # Convert to xarray Dataset
-            logger.info("Converting to xarray Dataset")
-            
-            # Get unique values for each dimension
-            strikes = sorted(df['strike'].unique())
-            dtes = sorted(df['DTE'].unique())
-            option_types = ['call', 'put']
-            
-            # Identify numeric and string columns
-            numeric_cols = []
-            string_cols = []
-            
-            # Log column types for debugging
-            logger.info(f"DataFrame columns: {df.columns.tolist()}")
-            logger.info(f"DataFrame dtypes: {df.dtypes}")
-            
-            # Explicitly check for known string columns
-            known_string_cols = ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
-            
-            for col in df.columns:
-                if col not in ['strike', 'DTE', 'option_type', 'expiration']:
-                    # Check if it's a known string column
-                    if col in known_string_cols:
-                        string_cols.append(col)
-                        logger.info(f"Added known string column: {col}")
-                    # Check if the column contains string data
-                    elif df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col].dtype):
-                        string_cols.append(col)
-                        logger.info(f"Detected string column: {col}")
-                    else:
-                        numeric_cols.append(col)
-                        logger.info(f"Detected numeric column: {col}")
-            
-            logger.info(f"Numeric columns: {numeric_cols}")
-            logger.info(f"String columns: {string_cols}")
-            
-            # Create empty arrays for each variable with the right dimensions
-            data_vars = {}
-            
-            # Handle numeric columns
+        if not self.options_data or not self.current_price:
+            logger.error("Missing required data for processing")
+            return None
+        logger.info(f"Processing options data with current price: {self.current_price}")
+        dfs = []
+        now = pd.Timestamp.now().normalize()
+        for exp, data in self.options_data.items():
+            exp_date = pd.to_datetime(exp).normalize()
+            dte = max(0, (exp_date - now).days)
+            for opt_type, df in [('call', data.get('calls', pd.DataFrame())), ('put', data.get('puts', pd.DataFrame()))]:
+                if not df.empty:
+                    df = df.copy()
+                    df['option_type'] = opt_type
+                    df['expiration'] = exp_date
+                    df['DTE'] = dte
+                    dfs.append(df)
+        if not dfs:
+            logger.error("No valid data to process")
+            return None
+        df = pd.concat(dfs, ignore_index=True)
+        
+        # Define numeric columns explicitly
+        numeric_cols = [
+            'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
+            'openInterest', 'impliedVolatility', 'inTheMoney', 'strike'
+        ]
+        
+        # Convert to numeric, coercing errors to NaN
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                logger.info(f"Converted {col} to numeric, NaN count: {df[col].isna().sum()}")
+        
+        df['mid_price'] = (df['bid'] + df['ask']) / 2
+        df['price'] = df['mid_price']
+        mask_call = df['option_type'] == 'call'
+        df.loc[mask_call, 'intrinsic_value'] = np.maximum(0, self.current_price - df.loc[mask_call, 'strike'])
+        df.loc[~mask_call, 'intrinsic_value'] = np.maximum(0, df.loc[~mask_call, 'strike'] - self.current_price)
+        df['extrinsic_value'] = df['price'] - df['intrinsic_value']
+        self.min_strike = df['strike'].min()
+        self.max_strike = df['strike'].max()
+        strikes = sorted(df['strike'].unique())
+        dtes = sorted(df['DTE'].unique())
+        option_types = ['call', 'put']
+        numeric_cols = [col for col in df.columns if col not in ['strike', 'DTE', 'option_type', 'expiration', 'contractSymbol', 'lastTradeDate', 'contractSize', 'currency'] and pd.api.types.is_numeric_dtype(df[col])]
+        string_cols = ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+        data_vars = {col: (['strike', 'DTE', 'option_type'], np.full((len(strikes), len(dtes), len(option_types)), np.nan if col in numeric_cols else None, dtype=float if col in numeric_cols else object)) for col in numeric_cols + string_cols}
+        ds = xr.Dataset(data_vars=data_vars, coords={'strike': strikes, 'DTE': dtes, 'option_type': option_types})
+        ds.coords['expiration'] = ('DTE', np.array([df[df['DTE'] == dte]['expiration'].iloc[0] for dte in dtes], dtype='datetime64[ns]'))
+        for _, row in df.iterrows():
             for col in numeric_cols:
-                data_vars[col] = (
-                    ['strike', 'DTE', 'option_type'], 
-                    np.full((len(strikes), len(dtes), len(option_types)), np.nan)
-                )
-            
-            # Handle string columns - use object arrays filled with None
+                ds[col].loc[{'strike': row['strike'], 'DTE': row['DTE'], 'option_type': row['option_type']}] = row[col]
             for col in string_cols:
-                data_vars[col] = (
-                    ['strike', 'DTE', 'option_type'], 
-                    np.full((len(strikes), len(dtes), len(option_types)), None, dtype=object)
-                )
-            
-            # Create the dataset with coordinates
-            ds = xr.Dataset(
-                data_vars=data_vars,
-                coords={
-                    'strike': strikes,
-                    'DTE': dtes,
-                    'option_type': option_types,
-                }
-            )
-            
-            # Add expiration date as a coordinate mapped to DTE
-            expiry_dates = {dte: df[df['DTE'] == dte]['expiration'].iloc[0] for dte in dtes}
-            expiry_dates_array = np.array([expiry_dates[dte] for dte in dtes], dtype='datetime64[ns]')
-            ds.coords['expiration'] = ('DTE', expiry_dates_array)
-            
-            # Fill the dataset with values from the DataFrame
-            for idx, row in df.iterrows():
-                strike = row['strike']
-                dte = row['DTE']
-                opt_type = row['option_type']
-                
-                # For each column, set the value at the right position
-                for col in numeric_cols:
-                    try:
-                        ds[col].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = row[col]
-                    except Exception as e:
-                        logger.warning(f"Could not set numeric value for {col} at strike={strike}, DTE={dte}, option_type={opt_type}: {e}")
-                        continue
-                
-                # Handle string columns separately
-                for col in string_cols:
-                    try:
-                        ds[col].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = str(row[col])
-                    except Exception as e:
-                        logger.warning(f"Could not set string value for {col} at strike={strike}, DTE={dte}, option_type={opt_type}: {e}")
-                        continue
-            
-            logger.info("Successfully processed options data into xarray Dataset")
-            return ds
-            
-        except Exception as e:
-            logger.error(f"Error processing options data: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return None
+                ds[col].loc[{'strike': row['strike'], 'DTE': row['DTE'], 'option_type': row['option_type']}] = str(row[col])
+        logger.info("Successfully processed options data into xarray Dataset")
+        return ds
 
-    def get_data(self):
-        """Returns the processed options data as an xarray Dataset."""
-        if self.ds is None:
-            logger.error("No processed data available")
-        return self.ds
-    
-    def get_data_frame(self):
-        """
-        Returns the processed options data as a pandas DataFrame for backward compatibility.
-        """
-        if self.ds is None:
-            logger.error("No processed data available")
-            return None
-        
-        try:
-            # Convert xarray Dataset to DataFrame
-            df = self.ds.to_dataframe().reset_index()
-            return df
-        except Exception as e:
-            logger.error(f"Error converting xarray to DataFrame: {str(e)}")
-            return None
-
-    def get_nearest_expiry(self):
-        """Returns the nearest expiration date."""
-        if self.ds is not None:
-            try:
-                min_dte = self.ds.DTE.min().item()
-                nearest = self.ds.expiration.sel(DTE=min_dte).item()
-                logger.info(f"Found nearest expiry: {nearest}")
-                return pd.Timestamp(nearest)
-            except Exception as e:
-                logger.error(f"Error getting nearest expiry: {str(e)}")
-        
-        logger.error("Cannot get nearest expiry - no data available")
-        return None
-
-    def get_expirations(self):
-        """Returns sorted list of all expiration dates."""
-        if self.ds is not None:
-            try:
-                expirations = sorted(self.ds.expiration.values)
-                logger.info(f"Found {len(expirations)} expiration dates")
-                return [pd.Timestamp(exp) for exp in expirations]
-            except Exception as e:
-                logger.error(f"Error getting expirations: {str(e)}")
-        
-        logger.error("Cannot get expirations - no data available")
-        return []
-        
-    def get_strike_range(self):
-        """Returns the min and max strike prices across all expirations."""
-        return self.min_strike, self.max_strike
-    
-    def get_data_for_expiry(self, expiry_date):
-        """
-        Returns data for a specific expiration date as a pandas DataFrame.
-        
-        Args:
-            expiry_date: A pandas Timestamp or datetime object
-        
-        Returns:
-            A pandas DataFrame with data for the specified expiration date
-        """
-        if self.ds is None:
-            logger.error("No processed data available")
-            return None
-        
-        try:
-            # Find the DTE value that corresponds to this expiration date
-            expiry_date = pd.Timestamp(expiry_date)
-            
-            # Find the closest matching expiration date
-            time_diffs = abs(self.ds.expiration.values - np.datetime64(expiry_date))
-            closest_idx = np.argmin(time_diffs)
-            closest_dte = self.ds.DTE.values[closest_idx]
-            
-            # Select data for this DTE
-            subset = self.ds.sel(DTE=closest_dte)
-            
-            # Convert to DataFrame and reset index
-            df = subset.to_dataframe().reset_index()
-            
-            # Drop rows with NaN values in key fields
-            df = df.dropna(subset=['price'])
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error getting data for expiry {expiry_date}: {str(e)}")
-            return None
-        
-    def interpolate_missing_values_2d(self):
-        """
-        Interpolate missing values in the dataset using 2D linear interpolation.
-        This fills gaps in the options chain for better visualization.
-        """
-        if self.ds is None:
+    def interpolate_missing_values_1d(self):
+        if not self.ds:
             logger.error("Cannot interpolate: No dataset available")
             return
-            
-        try:
-            logger.info("Starting 2D interpolation of missing values")
-            
-            # Identify numeric variables
-            numeric_vars = [var for var in self.ds.data_vars if np.issubdtype(self.ds[var].dtype, np.number)]
-            logger.info(f"Interpolating numeric variables: {numeric_vars}")
-            
-            # Check if we have enough DTE values for 2D interpolation
-            dtes = self.ds.DTE.values
-            if len(dtes) <= 1:
-                logger.info(f"Only {len(dtes)} DTE value(s) found, skipping 2D interpolation")
-                return
-            
-            # Loop over option types and variables
-            for opt_type in ['call', 'put']:
-                for variable in numeric_vars:
-                    # Extract 2D DataArray for this option type and variable
-                    da = self.ds[variable].sel(option_type=opt_type)
-                    
-                    # Check if there are any NaNs to interpolate
-                    if da.isnull().any():
-                        strikes = da.strike.values
-                        
-                        # Create a 2D grid of coordinates
-                        strike_grid, dte_grid = np.meshgrid(strikes, dtes, indexing='ij')
-                        points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
-                        
-                        # Flatten the data values
-                        values_flat = da.values.ravel()
-                        non_nan = ~np.isnan(values_flat)
-                        
-                        # If there are non-NaN values to base interpolation on
-                        if non_nan.sum() > 0:
-                            points_known = points[non_nan]  # Coordinates of known values
-                            values_known = values_flat[non_nan]  # Known values
-                            
-                            # Check if we have enough points for interpolation
-                            if len(points_known) < 3:
-                                logger.warning(f"Not enough points to interpolate {variable} for {opt_type}")
-                                continue
-                            
-                            # Check if all points have the same value in any dimension
-                            # This would cause the Qhull error
-                            dim_ranges = np.ptp(points_known, axis=0)
-                            if np.any(dim_ranges == 0):
-                                logger.warning(f"Dimension with zero range detected for {variable} {opt_type}, using nearest neighbor")
-                                try:
-                                    # Use nearest neighbor interpolation directly
-                                    interpolated_values = griddata(
-                                        points_known, values_known, (strike_grid, dte_grid), method='nearest'
-                                    )
-                                    # Update the DataArray with interpolated values
-                                    da.values = interpolated_values
-                                    logger.info(f"Interpolated {variable} for {opt_type} using nearest neighbor")
-                                    continue
-                                except Exception as e:
-                                    logger.error(f"Nearest interpolation failed for {variable} {opt_type}: {str(e)}")
-                                    # Skip this variable if nearest method fails
-                                    continue
-                                
-                            try:
-                                # Try standard linear interpolation
-                                interpolated_values = griddata(
-                                    points_known, values_known, (strike_grid, dte_grid), method='linear'
-                                )
-                                
-                                # Fill any remaining NaNs with nearest neighbor
-                                if np.isnan(interpolated_values).any():
-                                    nan_mask = np.isnan(interpolated_values)
-                                    nearest_values = griddata(
-                                        points_known, values_known, (strike_grid, dte_grid), method='nearest'
-                                    )
-                                    interpolated_values[nan_mask] = nearest_values[nan_mask]
-                                    
-                                # Update the DataArray with interpolated values
-                                da.values = interpolated_values
-                                logger.info(f"Interpolated {variable} for {opt_type}")
-                                
-                            except Exception as e:
-                                logger.warning(f"Linear interpolation failed for {variable} {opt_type}: {str(e)}")
-                                try:
-                                    # Fall back to nearest neighbor interpolation
-                                    logger.info(f"Falling back to nearest neighbor interpolation for {variable} {opt_type}")
-                                    interpolated_values = griddata(
-                                        points_known, values_known, (strike_grid, dte_grid), method='nearest'
-                                    )
-                                    # Update the DataArray with interpolated values
-                                    da.values = interpolated_values
-                                    logger.info(f"Interpolated {variable} for {opt_type} using nearest neighbor")
-                                except Exception as e2:
-                                    logger.error(f"Nearest interpolation also failed for {variable} {opt_type}: {str(e2)}")
-                                    # Skip this variable if both methods fail
-                                    continue
-                        else:
-                            logger.warning(f"No data available for {variable} {opt_type}, cannot interpolate")
-            
-            logger.info("Completed 2D interpolation")
-            
-        except Exception as e:
-            logger.error(f"Error during interpolation: {str(e)}")
-            logger.error(traceback.format_exc())
-            # Continue with the rest of the processing even if interpolation fails
-            logger.info("Continuing with processing despite interpolation errors")
+        logger.info("Starting 1D interpolation of missing values")
+        numeric_vars = [var for var in self.ds.data_vars if np.issubdtype(self.ds[var].dtype, np.number)]
+        dte = self.ds.DTE.values[0]
+        for opt_type in ['call', 'put']:
+            for variable in numeric_vars:
+                if variable in ['volume', 'openInterest']:
+                    continue
+                da = self.ds[variable].sel(option_type=opt_type, DTE=dte)
+                if da.isnull().any():
+                    values = da.values
+                    strikes = da.strike.values
+                    valid = ~np.isnan(values)
+                    if np.sum(valid) >= 2:
+                        valid_indices = np.where(valid)[0]
+                        start_idx, end_idx = valid_indices[0], valid_indices[-1]
+                        s = pd.Series(values[start_idx:end_idx + 1], index=strikes[start_idx:end_idx + 1])
+                        s_interp = s.interpolate(method='linear')
+                        values[start_idx:end_idx + 1] = s_interp.values
+                        self.ds[variable].loc[{'option_type': opt_type, 'DTE': dte}] = values
+                        logger.info(f"1D interpolated {variable} for {opt_type} at DTE={dte}")
+                    else:
+                        logger.warning(f"Not enough valid points for 1D interpolation of {variable} for {opt_type}")
+
+    def interpolate_missing_values_2d(self):
+        if not self.ds:
+            logger.error("Cannot interpolate: No dataset available")
+            return
+        logger.info("Starting 2D interpolation of missing values")
+        numeric_vars = [var for var in self.ds.data_vars if np.issubdtype(self.ds[var].dtype, np.number)]
+        dtes = self.ds.DTE.values
+        if len(dtes) < 2:
+            logger.info(f"Only {len(dtes)} DTE value(s) found, skipping 2D interpolation")
+            return
+        for opt_type in ['call', 'put']:
+            for variable in numeric_vars:
+                if variable in ['volume', 'openInterest']:
+                    continue
+                da = self.ds[variable].sel(option_type=opt_type)
+                if da.isnull().any():
+                    strikes = da.strike.values
+                    strike_grid, dte_grid = np.meshgrid(strikes, dtes, indexing='ij')
+                    points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
+                    values_flat = da.values.ravel()
+                    non_nan = ~np.isnan(values_flat)
+                    if non_nan.sum() > 3:
+                        try:
+                            interpolated_values = griddata(points[non_nan], values_flat[non_nan], (strike_grid, dte_grid), method='linear')
+                            da.values = interpolated_values
+                            logger.info(f"2D interpolated {variable} for {opt_type} using linear method")
+                        except Exception as e:
+                            logger.warning(f"2D linear interpolation failed for {variable} {opt_type}: {str(e)}")
+                            for dte in dtes:
+                                slice_1d = da.sel(DTE=dte).values
+                                valid = ~np.isnan(slice_1d)
+                                if np.sum(valid) >= 2:
+                                    valid_indices = np.where(valid)[0]
+                                    start_idx, end_idx = valid_indices[0], valid_indices[-1]
+                                    s = pd.Series(slice_1d[start_idx:end_idx + 1], index=strikes[start_idx:end_idx + 1])
+                                    s_interp = s.interpolate(method='linear')
+                                    slice_1d[start_idx:end_idx + 1] = s_interp.values
+                                    self.ds[variable].loc[{'option_type': opt_type, 'DTE': dte}] = slice_1d
+                                    logger.info(f"1D fallback interpolated {variable} for {opt_type} at DTE={dte}")
+                    else:
+                        logger.warning(f"Not enough points ({non_nan.sum()}) for 2D interpolation of {variable} for {opt_type}")
 
     def apply_floors(self):
-        """Apply floors to bid, ask, and extrinsic value, and recompute spot and price."""
-        self.ds['bid'] = self.ds['bid'].clip(min=0.05)
-        self.ds['ask'] = self.ds['ask'].clip(min=0.05)
-        self.ds['spot'] = (self.ds['bid'] + self.ds['ask']) / 2
-        self.ds['price'] = self.ds['spot']
+        bid_mask = (self.ds['bid'].isnull() | (self.ds['bid'] < 0.05))
+        ask_mask = (self.ds['ask'].isnull() | (self.ds['ask'] < 0.05))
+        self.ds['bid'] = xr.where(bid_mask, 0.05, self.ds['bid'])
+        self.ds['ask'] = xr.where(ask_mask, 0.05, self.ds['ask'])
+        self.ds['mid_price'] = (self.ds['bid'] + self.ds['ask']) / 2
+        self.ds['price'] = self.ds['mid_price']
         self.ds['extrinsic_value'] = self.ds['price'] - self.ds['intrinsic_value']
-        self.ds['extrinsic_value'] = self.ds['extrinsic_value'].clip(min=0)
+        self.ds['extrinsic_value'] = xr.where(self.ds['extrinsic_value'] < 0, 0, self.ds['extrinsic_value'])
 
-    def compute_delta(self):
-        """Compute delta as the first derivative of price with respect to strike."""
-        strikes = self.ds.strike.values
-        price = self.ds['price'].values
-        delta = np.gradient(price, strikes, axis=0)
-        # Specify dimensions when assigning to dataset
-        self.ds['delta'] = (('strike', 'DTE', 'option_type'), delta)
-
-    def compute_gamma(self):
-        """Compute gamma as the second derivative of price with respect to strike."""
-        strikes = self.ds.strike.values
-        delta = self.ds['delta'].values
-        gamma = np.gradient(delta, strikes, axis=0)
-        # Specify dimensions when assigning to dataset
-        self.ds['gamma'] = (('strike', 'DTE', 'option_type'), gamma)
-
-    def compute_theta(self):
-        """Compute theta as the first derivative of price with respect to DTE."""
-        dtes = self.ds.DTE.values
-        price = self.ds['price'].values
-        # Convention is negative theta for long options
-        theta = -np.gradient(price, dtes, axis=1) 
-        # Specify dimensions when assigning to dataset
-        self.ds['theta'] = (('strike', 'DTE', 'option_type'), theta)
-    
     def post_process_data(self):
-        """Post-process data by applying floors, computing spread, delta, and gamma."""
         self.apply_floors()
         self.ds['spread'] = self.ds['ask'] - self.ds['bid']
         self.compute_delta()
         self.compute_gamma()
         self.compute_theta()
 
+    def get_data(self):
+        return self.ds if self.ds is not None else logger.error("No processed data available")
+
+    def get_data_frame(self):
+        return self.ds.to_dataframe().reset_index() if self.ds is not None else None
+
+    def get_nearest_expiry(self):
+        return pd.Timestamp(self.ds.expiration.sel(DTE=self.ds.DTE.min()).item()) if self.ds is not None else None
+
+    def get_expirations(self):
+        return [pd.Timestamp(exp) for exp in sorted(self.ds.expiration.values)] if self.ds is not None else []
+
+    def get_strike_range(self):
+        return self.min_strike, self.max_strike
+
+    def get_data_for_expiry(self, expiry_date):
+        if not self.ds:
+            return None
+        expiry_date = pd.Timestamp(expiry_date)
+        closest_idx = np.argmin(abs(self.ds.expiration.values - np.datetime64(expiry_date)))
+        closest_dte = self.ds.DTE.values[closest_idx]
+        return self.ds.sel(DTE=closest_dte).to_dataframe().reset_index().dropna(subset=['price'])
+
     def get_risk_free_rate(self):
-        """Get the risk-free rate."""
-        api = YahooFinanceAPI()
-        return api.get_risk_free_rate("^TNX")
+        return YahooFinanceAPI().get_risk_free_rate("^TNX")
 
+    def compute_delta(self):
+        delta = np.gradient(self.ds['price'].values, self.ds.strike.values, axis=0)
+        self.ds['delta'] = (('strike', 'DTE', 'option_type'), delta)
 
+    def compute_gamma(self):
+        gamma = np.gradient(self.ds['delta'].values, self.ds.strike.values, axis=0)
+        self.ds['gamma'] = (('strike', 'DTE', 'option_type'), gamma)
 
+    def compute_theta(self):
+        theta = -np.gradient(self.ds['price'].values, self.ds.DTE.values, axis=1)
+        self.ds['theta'] = (('strike', 'DTE', 'option_type'), theta)

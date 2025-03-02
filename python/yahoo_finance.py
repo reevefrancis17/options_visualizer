@@ -9,7 +9,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 class YahooFinanceAPI:
-    def __init__(self, cache_duration=60):
+    def __init__(self, cache_duration=600):
         self.max_retries = 3
         self.retry_delay = 2  # seconds
         self._cache = {}
@@ -52,7 +52,8 @@ class YahooFinanceAPI:
             logger.info(f"Using cached data for {ticker} with price {cached_price}")
             # Call the callback with complete cached data if provided
             if progress_callback:
-                progress_callback(cached_data, cached_price, len(cached_data), len(cached_data))
+                expiry_count = len(cached_data)
+                progress_callback(cached_data, cached_price, expiry_count, expiry_count)
             return cached_data, cached_price
 
         logger.info(f"Fetching fresh data for ticker: {ticker}")
@@ -142,7 +143,7 @@ class YahooFinanceAPI:
                         if processed_dates % 5 == 0 or processed_dates == 1 or processed_dates == total_dates:
                             logger.info(f"Fetched {processed_dates}/{total_dates} expiration dates for {ticker}")
                         
-                        # Call the progress callback if provided
+                        # Call the progress callback after each date is processed
                         if progress_callback and current_price:
                             # Make a copy of the data to avoid reference issues
                             callback_data = options_data.copy()

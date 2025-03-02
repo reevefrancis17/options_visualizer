@@ -1,5 +1,365 @@
-=== New session started at 2025-02-26 23:33:26 ===
-2025-02-26 23:33:26,695 - __main__ - INFO - Starting Options Visualizer Web App
-2025-02-26 23:33:26,695 - python.options_data - INFO - Initializing OptionsDataManager with source=yahoo, model=market
-2025-02-26 23:33:26,705 - werkzeug - WARNING -  * Debugger is active!
-2025-02-26 23:33:26,709 - werkzeug - INFO -  * Debugger PIN: 797-671-465
+=== New session started at 2025-03-01 18:54:19 ===
+2025-03-01 18:54:19,098 - __main__ - INFO - Starting Options Visualizer Web App
+2025-03-01 18:54:19,099 - __main__ - INFO - Static folder: /Users/reevefrancis/repos/options_visualizer/options_visualizer_web/static
+2025-03-01 18:54:19,099 - __main__ - INFO - Template folder: /Users/reevefrancis/repos/options_visualizer/options_visualizer_web/templates
+2025-03-01 18:54:19,099 - python.options_data - INFO - Initializing OptionsDataManager with source=yahoo, model=market
+2025-03-01 18:54:19,112 - werkzeug - WARNING -  * Debugger is active!
+2025-03-01 18:54:19,117 - werkzeug - INFO -  * Debugger PIN: 797-671-465
+2025-03-01 18:54:24,106 - werkzeug - INFO - 127.0.0.1 - - [01/Mar/2025 18:54:24] "GET / HTTP/1.1" 200 -
+2025-03-01 18:54:24,116 - werkzeug - INFO - 127.0.0.1 - - [01/Mar/2025 18:54:24] "GET /static/js/main.js HTTP/1.1" 200 -
+2025-03-01 18:54:24,116 - werkzeug - INFO - 127.0.0.1 - - [01/Mar/2025 18:54:24] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+2025-03-01 18:54:24,289 - __main__ - INFO - Fetching options data for SPY
+2025-03-01 18:54:24,289 - python.options_data - INFO - Fetching options data for SPY from yahoo
+2025-03-01 18:54:24,289 - python.yahoo_finance - INFO - Fetching fresh data for ticker: SPY
+2025-03-01 18:54:24,753 - python.yahoo_finance - INFO - Got current price for SPY: 594.18
+2025-03-01 18:54:24,867 - python.yahoo_finance - INFO - Found 29 expiration dates for SPY
+2025-03-01 18:54:24,982 - python.yahoo_finance - INFO - Fetched 1/29 expiration dates for SPY
+2025-03-01 18:54:24,982 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:24,982 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:25,146 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:25,146 - python.options_data - INFO - Starting 1D interpolation of missing values
+2025-03-01 18:54:25,147 - python.options_data - INFO - 1D interpolated lastPrice for call at DTE=2
+2025-03-01 18:54:25,147 - python.options_data - INFO - 1D interpolated bid for call at DTE=2
+2025-03-01 18:54:25,147 - python.options_data - INFO - 1D interpolated ask for call at DTE=2
+2025-03-01 18:54:25,148 - python.options_data - INFO - 1D interpolated change for call at DTE=2
+2025-03-01 18:54:25,148 - python.options_data - INFO - 1D interpolated percentChange for call at DTE=2
+2025-03-01 18:54:25,148 - python.options_data - INFO - 1D interpolated impliedVolatility for call at DTE=2
+2025-03-01 18:54:25,149 - python.options_data - INFO - 1D interpolated inTheMoney for call at DTE=2
+2025-03-01 18:54:25,149 - python.options_data - INFO - 1D interpolated spot for call at DTE=2
+2025-03-01 18:54:25,149 - python.options_data - INFO - 1D interpolated price for call at DTE=2
+2025-03-01 18:54:25,149 - python.options_data - INFO - 1D interpolated intrinsic_value for call at DTE=2
+2025-03-01 18:54:25,150 - python.options_data - INFO - 1D interpolated extrinsic_value for call at DTE=2
+2025-03-01 18:54:25,150 - python.options_data - INFO - 1D interpolated lastPrice for put at DTE=2
+2025-03-01 18:54:25,150 - python.options_data - INFO - 1D interpolated bid for put at DTE=2
+2025-03-01 18:54:25,151 - python.options_data - INFO - 1D interpolated ask for put at DTE=2
+2025-03-01 18:54:25,151 - python.options_data - INFO - 1D interpolated change for put at DTE=2
+2025-03-01 18:54:25,152 - python.options_data - INFO - 1D interpolated percentChange for put at DTE=2
+2025-03-01 18:54:25,152 - python.options_data - INFO - 1D interpolated impliedVolatility for put at DTE=2
+2025-03-01 18:54:25,152 - python.options_data - INFO - 1D interpolated inTheMoney for put at DTE=2
+2025-03-01 18:54:25,153 - python.options_data - INFO - 1D interpolated spot for put at DTE=2
+2025-03-01 18:54:25,153 - python.options_data - INFO - 1D interpolated price for put at DTE=2
+2025-03-01 18:54:25,153 - python.options_data - INFO - 1D interpolated intrinsic_value for put at DTE=2
+2025-03-01 18:54:25,154 - python.options_data - INFO - 1D interpolated extrinsic_value for put at DTE=2
+2025-03-01 18:54:25,158 - python.options_data - ERROR - Error creating temporary processor: index 0 is out of bounds for axis 0 with size 0
+2025-03-01 18:54:25,158 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:25,158 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:25,307 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:25,308 - python.options_data - INFO - Starting 1D interpolation of missing values
+2025-03-01 18:54:25,308 - python.options_data - INFO - 1D interpolated lastPrice for call at DTE=2
+2025-03-01 18:54:25,309 - python.options_data - INFO - 1D interpolated bid for call at DTE=2
+2025-03-01 18:54:25,309 - python.options_data - INFO - 1D interpolated ask for call at DTE=2
+2025-03-01 18:54:25,309 - python.options_data - INFO - 1D interpolated change for call at DTE=2
+2025-03-01 18:54:25,310 - python.options_data - INFO - 1D interpolated percentChange for call at DTE=2
+2025-03-01 18:54:25,310 - python.options_data - INFO - 1D interpolated impliedVolatility for call at DTE=2
+2025-03-01 18:54:25,310 - python.options_data - INFO - 1D interpolated inTheMoney for call at DTE=2
+2025-03-01 18:54:25,311 - python.options_data - INFO - 1D interpolated spot for call at DTE=2
+2025-03-01 18:54:25,311 - python.options_data - INFO - 1D interpolated price for call at DTE=2
+2025-03-01 18:54:25,311 - python.options_data - INFO - 1D interpolated intrinsic_value for call at DTE=2
+2025-03-01 18:54:25,311 - python.options_data - INFO - 1D interpolated extrinsic_value for call at DTE=2
+2025-03-01 18:54:25,312 - python.options_data - INFO - 1D interpolated lastPrice for put at DTE=2
+2025-03-01 18:54:25,312 - python.options_data - INFO - 1D interpolated bid for put at DTE=2
+2025-03-01 18:54:25,312 - python.options_data - INFO - 1D interpolated ask for put at DTE=2
+2025-03-01 18:54:25,313 - python.options_data - INFO - 1D interpolated change for put at DTE=2
+2025-03-01 18:54:25,313 - python.options_data - INFO - 1D interpolated percentChange for put at DTE=2
+2025-03-01 18:54:25,314 - python.options_data - INFO - 1D interpolated impliedVolatility for put at DTE=2
+2025-03-01 18:54:25,314 - python.options_data - INFO - 1D interpolated inTheMoney for put at DTE=2
+2025-03-01 18:54:25,315 - python.options_data - INFO - 1D interpolated spot for put at DTE=2
+2025-03-01 18:54:25,315 - python.options_data - INFO - 1D interpolated price for put at DTE=2
+2025-03-01 18:54:25,315 - python.options_data - INFO - 1D interpolated intrinsic_value for put at DTE=2
+2025-03-01 18:54:25,316 - python.options_data - INFO - 1D interpolated extrinsic_value for put at DTE=2
+2025-03-01 18:54:25,321 - python.yahoo_finance - ERROR - Error fetching option chain for 2025-03-03: index 0 is out of bounds for axis 0 with size 0
+2025-03-01 18:54:25,408 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:25,408 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:25,714 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:25,714 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:25,715 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:25,716 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:25,717 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:25,717 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:25,718 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:25,718 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:25,719 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:25,719 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:25,720 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:25,720 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:25,721 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:25,722 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:25,722 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:25,723 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:25,724 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:25,724 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:25,725 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:25,725 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:25,726 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:25,727 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:25,727 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:25,728 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:25,847 - python.options_data - INFO - Updated cache with partial data for SPY (2/29 dates)
+2025-03-01 18:54:25,847 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:25,847 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:26,137 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:26,137 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:26,138 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:26,138 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:26,139 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:26,140 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:26,140 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:26,141 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:26,141 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:26,142 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:26,143 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:26,143 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:26,144 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:26,144 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:26,145 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:26,146 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:26,146 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:26,147 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:26,148 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:26,148 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:26,149 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:26,150 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:26,150 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:26,151 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:26,326 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:26,326 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:26,735 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:26,735 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:26,737 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:26,737 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:26,738 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:26,739 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:26,739 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:26,740 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:26,741 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:26,742 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:26,743 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:26,743 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:26,744 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:26,745 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:26,746 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:26,747 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:26,747 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:26,748 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:26,749 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:26,750 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:26,751 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:26,752 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:26,753 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:26,754 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:26,780 - python.options_data - INFO - Updated cache with partial data for SPY (3/29 dates)
+2025-03-01 18:54:26,780 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:26,780 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:27,173 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:27,173 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:27,174 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:27,175 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:27,176 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:27,176 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:27,177 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:27,177 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:27,178 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:27,179 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:27,180 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:27,180 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:27,181 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:27,182 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:27,183 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:27,183 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:27,184 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:27,185 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:27,186 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:27,186 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:27,187 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:27,188 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:27,189 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:27,190 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:27,319 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:27,319 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:27,839 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:27,840 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:27,841 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:27,842 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:27,843 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:27,844 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:27,845 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:27,846 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:27,847 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:27,848 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:27,849 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:27,850 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:27,850 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:27,852 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:27,853 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:27,854 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:27,855 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:27,856 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:27,858 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:27,859 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:27,860 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:27,861 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:27,862 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:27,863 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:27,920 - python.options_data - INFO - Updated cache with partial data for SPY (4/29 dates)
+2025-03-01 18:54:27,920 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:27,920 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:28,433 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:28,434 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:28,435 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:28,436 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:28,437 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:28,437 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:28,438 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:28,439 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:28,440 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:28,441 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:28,442 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:28,443 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:28,444 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:28,446 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:28,447 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:28,448 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:28,449 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:28,450 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:28,451 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:28,452 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:28,453 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:28,454 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:28,455 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:28,456 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:28,627 - python.yahoo_finance - INFO - Fetched 5/29 expiration dates for SPY
+2025-03-01 18:54:28,627 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:28,627 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:29,349 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:29,349 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:29,351 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:29,352 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:29,353 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:29,355 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:29,357 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:29,358 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:29,359 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:29,360 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:29,362 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:29,363 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:29,365 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:29,366 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:29,368 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:29,369 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:29,371 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:29,372 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:29,373 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:29,375 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:29,376 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:29,377 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:29,379 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:29,380 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:29,428 - python.options_data - INFO - Updated cache with partial data for SPY (5/29 dates)
+2025-03-01 18:54:29,428 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:29,428 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:30,146 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:30,146 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:30,148 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:30,149 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:30,150 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:30,152 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:30,153 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:30,154 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:30,155 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:30,156 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:30,158 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:30,159 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:30,160 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:30,161 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:30,163 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:30,164 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:30,165 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:30,167 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:30,168 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:30,169 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:30,171 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:30,172 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:30,174 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:30,175 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:30,372 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:30,372 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:31,302 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:31,303 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:31,305 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:31,306 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:31,308 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:31,310 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:31,312 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:31,314 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:31,316 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:31,318 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:31,320 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:31,322 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:31,323 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:31,325 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:31,327 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:31,329 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:31,330 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:31,332 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:31,334 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:31,335 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:31,337 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:31,339 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:31,341 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:31,343 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:31,381 - python.options_data - INFO - Updated cache with partial data for SPY (6/29 dates)
+2025-03-01 18:54:31,381 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:31,381 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:32,289 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:32,289 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:32,291 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:32,293 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:32,294 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:32,296 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:32,298 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:32,299 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:32,301 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:32,303 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:32,304 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:32,306 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:32,308 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:32,309 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:32,311 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:32,313 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:32,314 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:32,316 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:32,318 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:32,320 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:32,322 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:32,324 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:32,326 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:32,328 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:32,526 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:32,526 - python.options_data - INFO - Processing options data with current price: 594.18
+2025-03-01 18:54:33,871 - python.options_data - INFO - Successfully processed options data into xarray Dataset
+2025-03-01 18:54:33,871 - python.options_data - INFO - Starting 2D interpolation of missing values
+2025-03-01 18:54:33,875 - python.options_data - INFO - 2D interpolated lastPrice for call using linear method
+2025-03-01 18:54:33,879 - python.options_data - INFO - 2D interpolated bid for call using linear method
+2025-03-01 18:54:33,882 - python.options_data - INFO - 2D interpolated ask for call using linear method
+2025-03-01 18:54:33,885 - python.options_data - INFO - 2D interpolated change for call using linear method
+2025-03-01 18:54:33,889 - python.options_data - INFO - 2D interpolated percentChange for call using linear method
+2025-03-01 18:54:33,892 - python.options_data - INFO - 2D interpolated impliedVolatility for call using linear method
+2025-03-01 18:54:33,895 - python.options_data - INFO - 2D interpolated inTheMoney for call using linear method
+2025-03-01 18:54:33,898 - python.options_data - INFO - 2D interpolated spot for call using linear method
+2025-03-01 18:54:33,901 - python.options_data - INFO - 2D interpolated price for call using linear method
+2025-03-01 18:54:33,903 - python.options_data - INFO - 2D interpolated intrinsic_value for call using linear method
+2025-03-01 18:54:33,906 - python.options_data - INFO - 2D interpolated extrinsic_value for call using linear method
+2025-03-01 18:54:33,909 - python.options_data - INFO - 2D interpolated lastPrice for put using linear method
+2025-03-01 18:54:33,912 - python.options_data - INFO - 2D interpolated bid for put using linear method
+2025-03-01 18:54:33,914 - python.options_data - INFO - 2D interpolated ask for put using linear method
+2025-03-01 18:54:33,917 - python.options_data - INFO - 2D interpolated change for put using linear method
+2025-03-01 18:54:33,920 - python.options_data - INFO - 2D interpolated percentChange for put using linear method
+2025-03-01 18:54:33,923 - python.options_data - INFO - 2D interpolated impliedVolatility for put using linear method
+2025-03-01 18:54:33,925 - python.options_data - INFO - 2D interpolated inTheMoney for put using linear method
+2025-03-01 18:54:33,927 - python.options_data - INFO - 2D interpolated spot for put using linear method
+2025-03-01 18:54:33,930 - python.options_data - INFO - 2D interpolated price for put using linear method
+2025-03-01 18:54:33,933 - python.options_data - INFO - 2D interpolated intrinsic_value for put using linear method
+2025-03-01 18:54:33,936 - python.options_data - INFO - 2D interpolated extrinsic_value for put using linear method
+2025-03-01 18:54:33,962 - python.options_data - INFO - Updated cache with partial data for SPY (7/29 dates)
+2025-03-01 18:54:33,962 - python.options_data - INFO - Initializing OptionsDataProcessor with current_price: 594.18
+2025-03-01 18:54:33,962 - python.options_data - INFO - Processing options data with current price: 594.18

@@ -1,5 +1,0 @@
-=== New session started at 2025-02-26 23:34:45 ===
-2025-02-26 23:34:45,787 - __main__ - INFO - Starting Options Visualizer Web App
-2025-02-26 23:34:45,787 - python.options_data - INFO - Initializing OptionsDataManager with source=yahoo, model=market
-2025-02-26 23:34:45,802 - werkzeug - WARNING -  * Debugger is active!
-2025-02-26 23:34:45,807 - werkzeug - INFO -  * Debugger PIN: 797-671-465

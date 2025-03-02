@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Options Visualizer</title>
     <!-- Plotly.js for interactive charts -->
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -36,7 +36,7 @@
             <div class="plot-options">
                 <fieldset>
                     <legend>Plot Type</legend>
-                    <label><input type="radio" name="plot-type" value="Spot" checked> Spot</label>
+                    <label><input type="radio" name="plot-type" value="Price" checked> Price</label>
                     <label><input type="radio" name="plot-type" value="Bid"> Bid</label>
                     <label><input type="radio" name="plot-type" value="Ask"> Ask</label>
                     <label><input type="radio" name="plot-type" value="Volume"> Volume</label>
@@ -46,16 +46,11 @@
             </div>
         </div>
         
-        <div id="loading-indicator" class="hidden">
-            <div class="spinner"></div>
-            <p>Loading data...</p>
-        </div>
-        
         <div id="plot-container">
-            <div id="options-plot"></div>
+            <div id="options-plot" style="width:100%; height:400px;"></div>
         </div>
         
-        <div id="error-message" class="hidden"></div>
+        <div id="error-message" style="display: none;"></div>
     </div>
     
     <!-- Custom JavaScript -->

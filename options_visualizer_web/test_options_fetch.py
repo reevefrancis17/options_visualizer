@@ -6,10 +6,11 @@ This script focuses only on testing if we can fetch and process options data.
 import os
 import sys
 import logging
+import numpy as np
 from datetime import datetime
 
 # Configure logging
-log_dir = 'debug'
+log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'debug', 'logs')
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
@@ -46,9 +47,9 @@ except Exception as e:
     logger.error(f"Failed to import options_data modules: {str(e)}")
     sys.exit(1)
 
-def test_fetch_options(symbol):
+def test_fetch_options(symbol, max_dates=None):
     """Test fetching options data for a given symbol."""
-    logger.info(f"=== Testing options data fetch for {symbol} ===")
+    logger.info(f"=== Testing options data fetch for {symbol} with max_dates={max_dates} ===")
     
     try:
         logger.info("Initializing OptionsDataManager")
@@ -56,7 +57,7 @@ def test_fetch_options(symbol):
         logger.info("OptionsDataManager initialized successfully")
         
         logger.info(f"Fetching options data for {symbol}")
-        processor, current_price = data_manager.get_options_data(symbol)
+        processor, current_price = data_manager.get_options_data(symbol, max_dates=max_dates)
         
         if processor is None or current_price is None:
             logger.error(f"Failed to fetch data for {symbol}")
@@ -109,6 +110,36 @@ def test_fetch_options(symbol):
             else:
                 logger.warning(f"Computed column {col} is missing")
         
+        # Check for minimum values in spot prices (which would indicate interpolation failure)
+        min_value = 0.05
+        spot_values = df['spot'].values
+        min_count = np.sum(np.isclose(spot_values, min_value))
+        total_count = len(spot_values)
+        min_percentage = (min_count / total_count) * 100 if total_count > 0 else 0
+        
+        logger.info(f"Spot price check: {min_count}/{total_count} values ({min_percentage:.2f}%) are at minimum value {min_value}")
+        
+        # If more than 50% of values are at minimum, interpolation likely failed
+        if min_percentage > 50:
+            logger.error("Interpolation verification failed: Too many minimum values")
+            return False
+        
+        # Check for interpolation success flag
+        if hasattr(processor, 'interpolation_successful'):
+            logger.info(f"Interpolation success flag: {processor.interpolation_successful}")
+            if not processor.interpolation_successful and len(expiry_dates) > 1:
+                logger.error("Interpolation was not successful despite having multiple expiry dates")
+                return False
+        
+        # Test getting data for a specific expiry date
+        if expiry_dates:
+            logger.info(f"Testing get_data_for_expiry with date {expiry_dates[0]}")
+            expiry_df = processor.get_data_for_expiry(expiry_dates[0])
+            if expiry_df is None or expiry_df.empty:
+                logger.error(f"Failed to get data for expiry date {expiry_dates[0]}")
+                return False
+            logger.info(f"Successfully got data for expiry date {expiry_dates[0]}, shape: {expiry_df.shape}")
+        
         logger.info(f"=== Successfully completed test for {symbol} ===")
         return True
         
@@ -118,16 +149,54 @@ def test_fetch_options(symbol):
         logger.error(f"Traceback: {traceback.format_exc()}")
         return False
 
+def test_progressive_loading(symbol):
+    """Test progressive loading of expiry dates and interpolation."""
+    logger.info(f"=== Testing progressive loading for {symbol} ===")
+    
+    # Test with 1 date
+    logger.info("Testing with 1 expiry date")
+    success_1 = test_fetch_options(symbol, max_dates=1)
+    
+    # Test with 2 dates
+    logger.info("Testing with 2 expiry dates")
+    success_2 = test_fetch_options(symbol, max_dates=2)
+    
+    # Test with 3 dates
+    logger.info("Testing with 3 expiry dates")
+    success_3 = test_fetch_options(symbol, max_dates=3)
+    
+    # Test with all dates
+    logger.info("Testing with all expiry dates")
+    success_all = test_fetch_options(symbol)
+    
+    # Report results
+    logger.info(f"Progressive loading test results for {symbol}:")
+    logger.info(f"  1 date: {'✅ PASS' if success_1 else '❌ FAIL'}")
+    logger.info(f"  2 dates: {'✅ PASS' if success_2 else '❌ FAIL'}")
+    logger.info(f"  3 dates: {'✅ PASS' if success_3 else '❌ FAIL'}")
+    logger.info(f"  All dates: {'✅ PASS' if success_all else '❌ FAIL'}")
+    
+    return success_1 and success_2 and success_3 and success_all
+
 def main():
     """Main test function."""
     symbols_to_test = ['SPY', 'AAPL']
     
+    # Test basic functionality
     for symbol in symbols_to_test:
         success = test_fetch_options(symbol)
         if success:
-            logger.info(f"✅ Test PASSED for {symbol}")
+            logger.info(f"✅ Basic test PASSED for {symbol}")
         else:
-            logger.error(f"❌ Test FAILED for {symbol}")
+            logger.error(f"❌ Basic test FAILED for {symbol}")
+    
+    # Test progressive loading
+    for symbol in symbols_to_test:
+        success = test_progressive_loading(symbol)
+        if success:
+            logger.info(f"✅ Progressive loading test PASSED for {symbol}")
+        else:
+            logger.error(f"❌ Progressive loading test FAILED for {symbol}")
 
 if __name__ == "__main__":
     logger.info("Starting main test function")
