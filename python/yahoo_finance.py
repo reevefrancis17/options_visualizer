@@ -1,38 +1,141 @@
 import yfinance as yf
 import logging
 import time
+import concurrent.futures
 from datetime import datetime
-from typing import Callable, Dict, Any, Optional, Tuple
+from typing import Callable, Dict, Any, Optional, Tuple, List
 import pandas as pd
+import numpy as np
+import requests
 
 # Set up logger - Use existing logger without adding a duplicate handler
 logger = logging.getLogger(__name__)
 
 class YahooFinanceAPI:
-    def __init__(self, cache_duration=600):
+    def __init__(self, cache_duration=600, max_workers=4):
+        """Initialize the Yahoo Finance API wrapper.
+        
+        Args:
+            cache_duration: Cache duration in seconds (for reference only)
+            max_workers: Maximum number of worker threads for parallel processing
+        """
         self.max_retries = 3
         self.retry_delay = 2  # seconds
-        self._cache = {}
-        self.cache_duration = cache_duration  # Configurable cache duration
+        self.cache_duration = cache_duration  # For reference only
+        self.max_workers = max_workers  # For parallel processing
+        self._session = None  # Lazy-loaded session
+        
+    @property
+    def session(self):
+        """Get or create a requests session for reuse."""
+        if self._session is None:
+            # Create a new session directly instead of trying to access Ticker's _session
+            self._session = requests.Session()
+            # Configure the session with appropriate headers
+            self._session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'
+            })
+        return self._session
 
-    def _get_from_cache(self, ticker):
-        if ticker in self._cache:
-            data, price, timestamp = self._cache[ticker]
-            if time.time() - timestamp < self.cache_duration:
-                logger.info(f"Using cached data for {ticker}")
-                return data, price
-        return None, None
+    def get_risk_free_rate(self, ticker="^TNX"):
+        """Get the risk-free rate from treasury yield."""
+        try:
+            treasury = yf.Ticker(ticker)
+            # Get the most recent yield (adjusted close price)
+            risk_free_rate = treasury.history(period="1d")["Close"].iloc[-1] / 100
+            return risk_free_rate
+        except Exception as e:
+            logger.error(f"Error getting risk-free rate: {str(e)}")
+            # Default to a reasonable value if we can't get the actual rate
+            return 0.035  # 3.5% as fallback
 
-    def get_risk_free_rate(self, ticker):
-        """Get the risk-free rate."""
-        treasury = yf.Ticker("^TNX")
-        # Get the most recent yield (adjusted close price)
-        risk_free_rate = treasury.history(period="1d")["Close"].iloc[-1] / 100
-        return risk_free_rate
+    def _get_current_price(self, stock, ticker):
+        """Helper method to get current price with fallbacks."""
+        try:
+            # Try to get info first (most accurate)
+            info = stock.info
+            if not isinstance(info, dict):
+                logger.warning(f"Unexpected info type for {ticker}: {type(info)}")
+                raise ValueError("Info is not a dictionary")
+                
+            if 'regularMarketPrice' in info:
+                return info['regularMarketPrice']
+            elif 'currentPrice' in info:
+                return info['currentPrice']
+            elif 'previousClose' in info:
+                # Use previous close as a last resort
+                logger.warning(f"Using previousClose as current price for {ticker}")
+                return info['previousClose']
+            else:
+                raise ValueError("No price fields found in info")
+                
+        except Exception as info_error:
+            logger.warning(f"Error getting price from info for {ticker}: {str(info_error)}")
+            
+            # Try to get price from history as a fallback
+            try:
+                hist = stock.history(period="1d")
+                if not hist.empty:
+                    price = hist['Close'].iloc[-1]
+                    logger.info(f"Got current price from history for {ticker}: {price}")
+                    return price
+                else:
+                    raise ValueError("History data is empty")
+            except Exception as hist_error:
+                logger.error(f"Error getting price from history for {ticker}: {str(hist_error)}")
+                raise ValueError(f"Failed to get price for {ticker}")
+
+    def _process_expiry_date(self, stock, ticker, expiry, processed_dates, total_dates):
+        """Process a single expiration date."""
+        try:
+            # Get options chain for this expiration
+            opt = stock.option_chain(expiry)
+            
+            # Convert DataFrames to records for more efficient serialization
+            # Only keep essential columns to reduce memory usage
+            essential_columns = [
+                'strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 
+                'volume', 'openInterest', 'impliedVolatility', 'inTheMoney',
+                'contractSymbol', 'lastTradeDate', 'contractSize', 'currency'
+            ]
+            
+            # Filter columns for calls
+            calls_df = opt.calls
+            calls_columns = [col for col in essential_columns if col in calls_df.columns]
+            calls = calls_df[calls_columns].to_dict('records')
+            
+            # Filter columns for puts
+            puts_df = opt.puts
+            puts_columns = [col for col in essential_columns if col in puts_df.columns]
+            puts = puts_df[puts_columns].to_dict('records')
+            
+            logger.info(f"Processed expiry date {expiry} for {ticker}: {len(calls)} calls, {len(puts)} puts")
+            
+            return {
+                'expiry': expiry,
+                'data': {
+                    'calls': calls,
+                    'puts': puts
+                },
+                'processed': processed_dates,
+                'total': total_dates
+            }
+        except Exception as e:
+            logger.error(f"Error processing expiry date {expiry} for {ticker}: {str(e)}")
+            return {
+                'expiry': expiry,
+                'data': {
+                    'calls': [],
+                    'puts': []
+                },
+                'error': str(e),
+                'processed': processed_dates,
+                'total': total_dates
+            }
 
     def get_options_data(self, ticker, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None, max_dates=None):
         """
-        Fetch options data for a ticker with progressive loading support
+        Fetch options data for a ticker with progressive loading and parallel processing.
         
         Args:
             ticker: The stock ticker symbol
@@ -46,16 +149,6 @@ class YahooFinanceAPI:
         Returns:
             Tuple of (options_data, current_price)
         """
-        # Try to get data from cache first
-        cached_data, cached_price = self._get_from_cache(ticker)
-        if cached_data:
-            logger.info(f"Using cached data for {ticker} with price {cached_price}")
-            # Call the callback with complete cached data if provided
-            if progress_callback:
-                expiry_count = len(cached_data)
-                progress_callback(cached_data, cached_price, expiry_count, expiry_count)
-            return cached_data, cached_price
-
         logger.info(f"Fetching fresh data for ticker: {ticker}")
         
         # Initialize variables to track partial data fetching
@@ -64,122 +157,109 @@ class YahooFinanceAPI:
         
         for attempt in range(self.max_retries):
             try:
+                # Create ticker object - don't pass session parameter
                 stock = yf.Ticker(ticker)
                 
                 # Get current price
-                try:
-                    info = stock.info
-                    if not isinstance(info, dict):
-                        logger.warning(f"Unexpected info type for {ticker}: {type(info)}")
-                        # Try to get price from history as a fallback
-                        hist = stock.history(period="1d")
-                        if not hist.empty:
-                            current_price = hist['Close'].iloc[-1]
-                            logger.info(f"Got current price from history for {ticker}: {current_price}")
-                        else:
-                            raise ValueError("Could not get current price from history")
-                    elif 'regularMarketPrice' in info:
-                        current_price = info['regularMarketPrice']
-                    elif 'currentPrice' in info:
-                        current_price = info['currentPrice']
-                    elif 'previousClose' in info:
-                        # Use previous close as a last resort
-                        current_price = info['previousClose']
-                        logger.warning(f"Using previousClose as current price for {ticker}: {current_price}")
-                    else:
-                        logger.error(f"Missing price data in info for {ticker}")
-                        raise ValueError("Could not get current price")
-                except Exception as price_error:
-                    logger.error(f"Error getting price for {ticker}: {str(price_error)}")
-                    # Try to get price from history as a fallback
-                    try:
-                        hist = stock.history(period="1d")
-                        if not hist.empty:
-                            current_price = hist['Close'].iloc[-1]
-                            logger.info(f"Got current price from history for {ticker}: {current_price}")
-                        else:
-                            raise ValueError("Could not get current price from history")
-                    except Exception as hist_error:
-                        logger.error(f"Error getting price from history for {ticker}: {str(hist_error)}")
-                        raise ValueError("Could not get current price")
+                current_price = self._get_current_price(stock, ticker)
                 
-                logger.info(f"Got current price for {ticker}: {current_price}")
+                # Get expiration dates
+                expiry_dates = stock.options
+                if not expiry_dates:
+                    logger.error(f"No expiration dates found for {ticker}")
+                    raise ValueError(f"No options data available for {ticker}")
                 
-                # Call the progress callback with just the price if provided
-                if progress_callback and current_price:
-                    progress_callback({}, current_price, 0, 0)
+                logger.info(f"Found {len(expiry_dates)} expiration dates for {ticker}")
                 
-                # Get options dates
-                options_dates = stock.options
-                if not options_dates:
-                    logger.error(f"No options dates available for {ticker}")
-                    raise ValueError("No options dates available")
-                logger.info(f"Found {len(options_dates)} expiration dates for {ticker}")
+                # Limit the number of dates if max_dates is specified
+                if max_dates and len(expiry_dates) > max_dates:
+                    logger.info(f"Limiting to {max_dates} expiration dates for {ticker}")
+                    expiry_dates = expiry_dates[:max_dates]
                 
-                # Sort dates to prioritize near-term expirations
-                sorted_dates = sorted(options_dates, key=lambda date_str: pd.to_datetime(date_str))
+                # Total number of dates to process
+                total_dates = len(expiry_dates)
                 
-                # Limit the number of dates to fetch if max_dates is specified
-                if max_dates and len(sorted_dates) > max_dates:
-                    logger.info(f"Limiting to {max_dates} expiration dates (out of {len(sorted_dates)})")
-                    sorted_dates = sorted_dates[:max_dates]
+                # Process expiration dates in parallel for better performance
+                # Use a higher number of workers for better throughput
+                max_workers = min(self.max_workers * 2, total_dates)
                 
-                # Get options data
-                total_dates = len(sorted_dates)
-                processed_dates = 0
-                
-                # Fetch option chains for each date
-                for date in sorted_dates:
-                    try:
-                        opt = stock.option_chain(date)
-                        if opt is None or not hasattr(opt, 'calls') or not hasattr(opt, 'puts'):
-                            logger.error(f"Invalid options data for {ticker} on {date}")
-                            continue
-                            
-                        options_data[date] = {'calls': opt.calls, 'puts': opt.puts}
-                        processed_dates += 1
-                        
-                        # Log less frequently for better performance
-                        if processed_dates % 5 == 0 or processed_dates == 1 or processed_dates == total_dates:
-                            logger.info(f"Fetched {processed_dates}/{total_dates} expiration dates for {ticker}")
-                        
-                        # Call the progress callback after each date is processed
-                        if progress_callback and current_price:
-                            # Make a copy of the data to avoid reference issues
-                            callback_data = options_data.copy()
-                            progress_callback(callback_data, current_price, processed_dates, total_dates)
-                            
-                    except Exception as e:
-                        logger.error(f"Error fetching option chain for {date}: {str(e)}")
-                        # Continue with other dates instead of failing completely
-                        continue
-                
-                # Return data if we have at least one valid expiration date
-                if options_data and current_price:
-                    # Store both data and price in cache
-                    self._cache[ticker] = (options_data, current_price, time.time())
-                    logger.info(f"Successfully cached data for {ticker} with {len(options_data)} expiration dates")
-                    return options_data, current_price
-                else:
-                    logger.error(f"No valid options data found for {ticker}")
-                    raise ValueError("No valid options data found")
-                
-            except ValueError as e:
-                logger.error(f"Data error for {ticker} on attempt {attempt + 1}: {str(e)}")
-                if attempt == self.max_retries - 1:
-                    # Return partial data if we have any
-                    if options_data and current_price:
-                        logger.warning(f"Returning partial data for {ticker} after error: {str(e)}")
-                        return options_data, current_price
-                    return None, None
-            except Exception as e:
-                logger.error(f"Unexpected error for {ticker} on attempt {attempt + 1}: {str(e)}")
-                if "rate limit" in str(e).lower() or "too many requests" in str(e).lower():
-                    # Wait longer for rate limit errors
-                    time.sleep(self.retry_delay * 2)
-                else:
-                    time.sleep(self.retry_delay)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all tasks
+                    future_to_expiry = {
+                        executor.submit(
+                            self._process_expiry_date, 
+                            stock, 
+                            ticker, 
+                            expiry, 
+                            i+1, 
+                            total_dates
+                        ): expiry for i, expiry in enumerate(expiry_dates)
+                    }
                     
-        # If we get here, all retries failed
-        logger.error(f"All retries failed for {ticker}")
+                    # Process results as they complete
+                    for future in concurrent.futures.as_completed(future_to_expiry):
+                        expiry = future_to_expiry[future]
+                        try:
+                            result = future.result()
+                            
+                            # Add to options data
+                            if result and 'data' in result:
+                                options_data[expiry] = result['data']
+                                
+                                # Call progress callback if provided
+                                if progress_callback:
+                                    processed_dates = result['processed']
+                                    progress_callback(options_data, current_price, processed_dates, total_dates)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing future for {expiry}: {str(e)}")
+                
+                # Return the data we have
+                return options_data, current_price
+                
+            except Exception as e:
+                logger.error(f"Error in attempt {attempt + 1} for {ticker}: {str(e)}")
+                if attempt < self.max_retries - 1:
+                    logger.info(f"Retrying {ticker} (attempt {attempt + 1}/{self.max_retries})")
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error(f"All {self.max_retries} attempts failed for {ticker}")
+                    raise
+        
+        # If we get here, all attempts failed
         return None, None
+        
+    def get_batch_options_data(self, tickers: List[str], max_dates=None):
+        """
+        Fetch options data for multiple tickers in parallel.
+        
+        Args:
+            tickers: List of ticker symbols
+            max_dates: Maximum number of expiration dates to fetch per ticker
+            
+        Returns:
+            Dict mapping tickers to (options_data, current_price) tuples
+        """
+        logger.info(f"Fetching batch data for {len(tickers)} tickers")
+        
+        results = {}
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, len(tickers))) as executor:
+            # Submit all tasks
+            future_to_ticker = {
+                executor.submit(self.get_options_data, ticker, None, max_dates): ticker 
+                for ticker in tickers
+            }
+            
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    options_data, current_price = future.result()
+                    results[ticker] = (options_data, current_price)
+                    logger.info(f"Completed batch fetch for {ticker}")
+                except Exception as e:
+                    logger.error(f"Error in batch fetch for {ticker}: {str(e)}")
+                    results[ticker] = (None, None)
+        
+        return results

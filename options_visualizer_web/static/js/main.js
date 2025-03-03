@@ -14,7 +14,7 @@ const FIELD_MAPPING = {
 const PRICE_FIELDS = ["Price", "Bid", "Ask", "Intrinsic Value", "Extrinsic Value"];
 
 // Global state
-let state = {
+const state = {
     symbol: "",
     currentPrice: null,
     expiryDates: [],
@@ -26,7 +26,9 @@ let state = {
     isPolling: false,
     pollingInterval: null,
     lastProcessedDates: 0,
-    totalDates: 0
+    totalDates: 0,
+    isHovering: false,
+    plotHasMouseLeaveHandler: false
 };
 
 // DOM elements
@@ -115,19 +117,36 @@ function searchTicker() {
 // Fetch options data with support for partial data
 function fetchOptionsData(ticker, isPolling = false) {
     console.log(`Fetching options data for ${ticker}, polling: ${isPolling}`);
-    fetch('/api/get_options_data', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-            symbol: ticker
-        })
-    })
+    
+    // Update UI state
+    elements.searchBtn.disabled = true;
+    if (!isPolling) {
+        elements.statusLabel.textContent = `Loading ${ticker} data...`;
+        hideError();
+    }
+    
+    // Create a timeout promise
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Request timed out')), 30000); // 30 second timeout
+    });
+    
+    // Use the backend API directly with timeout
+    Promise.race([
+        fetch(`${CONFIG.BACKEND_URL}/api/options/${ticker}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }),
+        timeoutPromise
+    ])
     .then(response => {
         if (!response.ok) {
             return response.json().then(data => {
                 throw new Error(data.error || `Failed to fetch data for ${ticker}`);
+            }).catch(e => {
+                // If JSON parsing fails, throw the original HTTP error
+                throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
             });
         }
         return response.json();
@@ -135,56 +154,65 @@ function fetchOptionsData(ticker, isPolling = false) {
     .then(data => {
         console.log(`Received data for ${ticker}:`, data);
         
-        // Update state with the new data
-        state.symbol = data.symbol;
-        state.currentPrice = data.current_price;
+        // Update UI state
+        elements.searchBtn.disabled = false;
         
-        // If we have options data, update the state
-        if (data.options_data && data.options_data.length > 0) {
-            state.expiryDates = data.expiry_dates;
-            state.optionsData = data.options_data;
-            
-            if (state.currentExpiryIndex >= state.expiryDates.length) {
-                state.currentExpiryIndex = 0;
+        if (data.status === 'loading') {
+            // Data is still loading, start polling
+            elements.statusLabel.textContent = `Loading ${ticker} data... (${Math.round(data.progress || 0)}%)`;
+            if (!isPolling) {
+                startPolling(ticker);
             }
-            
-            // Update UI with the data we have
-            updateExpiryDisplay();
-            updatePlot();
+            return;
         }
         
-        state.lastProcessedDates = data.processed_dates;
-        state.totalDates = data.total_dates;
+        // Stop polling if we were polling
+        if (isPolling) {
+            stopPolling();
+        }
+        
+        // Process the data
+        state.symbol = ticker;
+        state.currentPrice = data.current_price;
+        state.expiryDates = data.expiry_dates || [];
+        state.optionsData = data.options_data || [];
         state.lastUpdateTime = new Date();
+        state.lastProcessedDates = data.processed_dates || 0;
+        state.totalDates = data.total_dates || 0;
         
-        // Update status based on whether we have partial or complete data
-        const timeStr = state.lastUpdateTime.toLocaleTimeString();
-        const progressStr = `${state.lastProcessedDates}/${state.totalDates} dates`;
-        const progressPct = data.progress ? `${Math.round(data.progress)}%` : '0%';
-        
-        if (data.status === 'loading' || data.status === 'partial') {
-            // Show loading status in the status label only
-            elements.statusLabel.textContent = `Loading: ${progressStr} (${progressPct}) | ${timeStr}`;
+        // Update status label
+        if (data.status === 'partial') {
+            const percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
+            elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
             
-            // Start polling for more data if we're not already polling
-            if (!state.isPolling) {
+            // Start polling for updates if not already polling
+            if (!isPolling) {
                 startPolling(ticker);
             }
         } else {
-            // Data is complete
-            elements.statusLabel.textContent = `Updated: ${timeStr} | ${state.expiryDates.length} dates loaded`;
-            stopPolling();
+            elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
         }
+        
+        // Reset expiry index if needed
+        if (state.currentExpiryIndex >= state.expiryDates.length) {
+            state.currentExpiryIndex = 0;
+        }
+        
+        // Update navigation buttons
+        updateExpiryDisplay();
+        
+        // Update the plot
+        updatePlot();
     })
     .catch(error => {
-        console.error('Error fetching data:', error);
-        showError(error.message);
-        elements.statusLabel.textContent = `Error: ${error.message.substring(0, 30)}...`;
-        stopPolling();
-    })
-    .finally(() => {
-        if (!state.isPolling) {
-            elements.searchBtn.disabled = false;
+        console.error(`Error fetching data for ${ticker}:`, error);
+        elements.searchBtn.disabled = false;
+        elements.statusLabel.textContent = `Error loading ${ticker} data`;
+        showError(error.message || 'Network error occurred');
+        
+        // Don't stop polling on first error if we're already polling
+        if (!isPolling) {
+            startPolling(ticker); // Start polling to retry
         }
     });
 }
@@ -199,16 +227,96 @@ function startPolling(ticker) {
         clearInterval(state.pollingInterval);
     }
     
-    // Poll every 2 seconds
+    // Track retry attempts and backoff
+    let retryCount = 0;
+    const maxRetries = 5;
+    const baseDelay = 2000; // Start with 2 seconds
+    
+    // Poll with exponential backoff on errors
     state.pollingInterval = setInterval(() => {
         // If we've loaded all dates, stop polling
         if (state.lastProcessedDates >= state.totalDates && state.totalDates > 0) {
+            console.log(`Polling complete for ${ticker}: all ${state.totalDates} dates processed`);
             stopPolling();
             return;
         }
         
-        fetchOptionsData(ticker, true);
-    }, 2000);
+        // If we've exceeded max retries, stop polling
+        if (retryCount >= maxRetries) {
+            console.error(`Exceeded maximum retry attempts (${maxRetries}) for ${ticker}`);
+            stopPolling();
+            showError(`Failed to load complete data for ${ticker} after multiple attempts. Please try again later.`);
+            return;
+        }
+        
+        // Fetch data with error handling
+        fetch(`${CONFIG.BACKEND_URL}/api/options/${ticker}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(data => {
+                    throw new Error(data.error || `Failed to fetch data for ${ticker}`);
+                });
+            }
+            // Reset retry count on successful response
+            retryCount = 0;
+            return response.json();
+        })
+        .then(data => {
+            console.log(`Polling received data for ${ticker}:`, data);
+            
+            if (data.status === 'loading') {
+                // Data is still loading
+                elements.statusLabel.textContent = `Loading ${ticker} data... (${Math.round(data.progress || 0)}%)`;
+                return;
+            }
+            
+            // Process the data
+            state.symbol = ticker;
+            state.currentPrice = data.current_price;
+            state.expiryDates = data.expiry_dates || [];
+            state.optionsData = data.options_data || [];
+            state.lastUpdateTime = new Date();
+            state.lastProcessedDates = data.processed_dates || 0;
+            state.totalDates = data.total_dates || 0;
+            
+            // Update status label
+            if (data.status === 'partial') {
+                const percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
+                elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
+            } else {
+                elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
+                stopPolling(); // Stop polling if we have complete data
+            }
+            
+            // Reset expiry index if needed
+            if (state.currentExpiryIndex >= state.expiryDates.length) {
+                state.currentExpiryIndex = 0;
+            }
+            
+            // Update navigation buttons
+            updateExpiryDisplay();
+            
+            // Update the plot
+            updatePlot();
+        })
+        .catch(error => {
+            console.error(`Error during polling for ${ticker}:`, error);
+            retryCount++;
+            
+            // Update status to show retry attempt
+            elements.statusLabel.textContent = `Error loading ${ticker} data. Retry ${retryCount}/${maxRetries}...`;
+            
+            // Don't show error message for retries to avoid UI clutter
+            if (retryCount >= maxRetries) {
+                showError(`Failed to load data for ${ticker}: ${error.message}`);
+            }
+        });
+    }, baseDelay);
 }
 
 // Stop polling
@@ -263,216 +371,163 @@ function nextExpiry() {
 
 // Update the plot with current data
 function updatePlot() {
-    console.log("Updating plot");
-    if (!state.optionsData || !state.expiryDates || state.expiryDates.length === 0) {
-        console.error('Cannot update plot: No data available');
-        return;
-    }
-    
     try {
-        const currentDate = state.expiryDates[state.currentExpiryIndex];
-        console.log(`Filtering data for date: ${currentDate}`);
-        
-        // Filter data for current expiry date
-        const filteredData = state.optionsData.filter(item => item.expiration === currentDate);
-        
-        if (!filteredData || filteredData.length === 0) {
-            console.warn(`No data available for expiry date ${currentDate}, trying to find another date`);
-            
-            // Try to find another date with data
-            let foundValidDate = false;
-            for (let i = 0; i < state.expiryDates.length; i++) {
-                const testDate = state.expiryDates[i];
-                const testData = state.optionsData.filter(item => item.expiration === testDate);
-                if (testData && testData.length > 0) {
-                    state.currentExpiryIndex = i;
-                    updateExpiryDisplay();
-                    // Call updatePlot again with the new date
-                    updatePlot();
-                    foundValidDate = true;
-                    break;
-                }
-            }
-            
-            if (!foundValidDate) {
-                console.error('No valid data found for any expiry date');
-                return;
-            }
+        if (!state.optionsData || state.optionsData.length === 0 || !state.expiryDates || state.expiryDates.length === 0) {
+            console.warn("No data to plot");
             return;
         }
-        
-        console.log(`Found ${filteredData.length} data points for date ${currentDate}`);
-        
-        // Get selected plot type
+
         const selectedPlotType = Array.from(elements.plotOptions).find(option => option.checked).value;
         const plotField = FIELD_MAPPING[selectedPlotType];
-        
-        // Separate calls and puts
-        const calls = filteredData.filter(item => item.option_type === 'call');
-        const puts = filteredData.filter(item => item.option_type === 'put');
-        
-        console.log(`Calls: ${calls.length}, Puts: ${puts.length}`);
-        
-        // Calculate days to expiry
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const expiryDate = new Date(currentDate);
-        const dte = Math.max(0, Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24)));
-        
-        // Filter out null values and create traces for calls and puts
+        const currentDate = state.expiryDates[state.currentExpiryIndex];
+        const filteredData = state.optionsData.filter(item => item.expiration === currentDate);
+        const calls = filteredData.filter(item => item.option_type === 'call').sort((a, b) => a.strike - b.strike);
+        const puts = filteredData.filter(item => item.option_type === 'put').sort((a, b) => a.strike - b.strike);
+
+        // Calculate ATM strike
+        const strikes = [...new Set(filteredData.map(item => item.strike))].sort((a, b) => a - b);
+        const atm_strike = strikes.reduce((prev, curr) => 
+            Math.abs(curr - state.currentPrice) < Math.abs(prev - state.currentPrice) ? curr : prev, strikes[0]);
+
+        // Calculate yMax
+        const yValues = [...calls.map(item => item[plotField]), ...puts.map(item => item[plotField])]
+            .filter(y => y != null && !isNaN(y));
+        const yMax = yValues.length > 0 ? Math.max(...yValues) * 1.1 : 1;
+
+        // Get call and put values at ATM strike
+        const callData = calls.find(item => Math.abs(item.strike - atm_strike) < 0.01);
+        const putData = puts.find(item => Math.abs(item.strike - atm_strike) < 0.01);
+        const callValue = callData && callData[plotField] != null && !isNaN(callData[plotField]) ?
+            (PRICE_FIELDS.includes(selectedPlotType) ? `$${callData[plotField].toFixed(2)}` :
+            (Number.isInteger(callData[plotField]) ? callData[plotField].toString() : callData[plotField].toFixed(2))) : 'N/A';
+        const putValue = putData && putData[plotField] != null && !isNaN(putData[plotField]) ?
+            (PRICE_FIELDS.includes(selectedPlotType) ? `$${putData[plotField].toFixed(2)}` :
+            (Number.isInteger(putData[plotField]) ? putData[plotField].toString() : putData[plotField].toFixed(2))) : 'N/A';
+
+        // Define traces with initial values
         const callTrace = {
-            x: calls.filter(item => item.strike != null && item[plotField] != null)
-                 .map(item => item.strike),
-            y: calls.filter(item => item.strike != null && item[plotField] != null)
-                 .map(item => item[plotField]),
-            mode: 'lines',
-            name: 'Calls',
-            line: { color: 'blue' },
-            hoverinfo: 'x+y+name'
+            x: calls.map(item => item.strike),
+            y: calls.map(item => item[plotField]),
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: `Calls: ${callValue}`,
+            line: { color: 'blue', width: 2 },
+            marker: { size: 6, color: 'blue' }
         };
-        
+
         const putTrace = {
-            x: puts.filter(item => item.strike != null && item[plotField] != null)
-                .map(item => item.strike),
-            y: puts.filter(item => item.strike != null && item[plotField] != null)
-                .map(item => item[plotField]),
-            mode: 'lines',
-            name: 'Puts',
-            line: { color: 'red' },
-            hoverinfo: 'x+y+name'
+            x: puts.map(item => item.strike),
+            y: puts.map(item => item[plotField]),
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: `Puts: ${putValue}`,
+            line: { color: 'red', width: 2 },
+            marker: { size: 6, color: 'red' }
         };
-        
-        console.log(`Call trace points: ${callTrace.x.length}, Put trace points: ${putTrace.x.length}`);
-        
-        // Check if we have enough data points to plot
-        if (callTrace.x.length < 2 && putTrace.x.length < 2) {
-            console.warn(`Not enough data points for ${currentDate} to create a meaningful plot`);
-            return;
-        }
-        
-        // Create vertical line for current price
-        const yValues = [...callTrace.y.filter(y => y != null && !isNaN(y)), 
-                         ...putTrace.y.filter(y => y != null && !isNaN(y))];
-        
-        // Handle case where we might not have enough data yet
-        const maxY = yValues.length > 0 
-            ? Math.max(...yValues) * 1.1 
-            : 100; // Default if no valid data yet
-        
-        const priceLine = {
+
+        // Add current price line
+        const currentPriceLine = {
             x: [state.currentPrice, state.currentPrice],
-            y: [0, maxY],
-            mode: 'lines+text',
-            name: `Strike: --`,
-            text: [`Price: $${state.currentPrice.toFixed(2)}`, ''],
-            textposition: 'top',
-            textfont: {
-                color: 'black',
-                size: 12
-            },
+            y: [0, Math.max(...calls.map(item => item[plotField] || 0), ...puts.map(item => item[plotField] || 0)) * 1.1],
+            type: 'scatter',
+            mode: 'lines',
+            name: `Spot: $${state.currentPrice.toFixed(2)}`, // Changed from "Current Price"
             line: {
                 color: 'green',
                 width: 2,
                 dash: 'dash'
-            },
-            hoverinfo: 'none'
+            }
         };
-        
-        // Create data array for plot
-        const data = [callTrace, putTrace, priceLine];
-        
-        // Create layout
+
+        const hoverLine = {
+            x: [atm_strike, atm_strike],
+            y: [0, yMax],
+            type: 'scatter',
+            mode: 'lines',
+            name: `Strike: $${atm_strike.toFixed(2)}`,
+            line: { color: 'gray', width: 1, dash: 'dot' },
+            hoverinfo: 'none',
+            visible: true // Initially visible at ATM
+        };
+
         const layout = {
-            title: {
-                text: `${state.symbol} Options - ${selectedPlotType} (${dte} DTE)`,
-                font: {
-                    size: 18
-                }
-            },
-            xaxis: {
-                title: 'Strike Price',
-                tickprefix: '$'
-            },
+            title: `${state.symbol} Options - ${selectedPlotType} (${currentDate})`,
+            xaxis: { title: 'Strike Price ($)', tickprefix: '$' },
             yaxis: {
-                title: selectedPlotType,
+                title: PRICE_FIELDS.includes(selectedPlotType) ? `${selectedPlotType} ($)` : selectedPlotType,
                 tickprefix: PRICE_FIELDS.includes(selectedPlotType) ? '$' : ''
             },
             hovermode: 'closest',
             showlegend: true,
-            legend: {
-                x: 0,
-                y: 1
-            },
-            margin: {
-                l: 50,
-                r: 50,
-                t: 50,
-                b: 50
-            },
-            plot_bgcolor: '#f8f9fa',
-            paper_bgcolor: '#f8f9fa'
+            legend: { x: 0, y: 1 },
+            margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 }
         };
-        
-        console.log("Creating or updating plot");
-        
-        // Create or update plot
+
+        // Create or update the plot
+        const plotData = [callTrace, putTrace, currentPriceLine, hoverLine];
+
         if (!state.plot) {
-            console.log("Creating new plot");
-            try {
-                // Force a layout calculation before plotting
-                const plotDiv = elements.plotContainer;
-                console.log(`Plot container dimensions before plot: ${plotDiv.offsetWidth}x${plotDiv.offsetHeight}`);
-                
-                // Create the plot
-                Plotly.newPlot('options-plot', data, layout, {responsive: true})
-                    .then(() => {
-                        console.log("Plot created successfully");
-                        state.plot = document.getElementById('options-plot');
-                        
-                        // Add event listener for hover using the correct Plotly syntax
-                        state.plot.on('plotly_hover', function(data) {
-                            if (data.points && data.points.length > 0) {
-                                const strike = data.points[0].x;
-                                console.log(`Hover detected at strike: ${strike}`);
-                                if (strike !== state.hoveredStrike) {
-                                    state.hoveredStrike = strike;
-                                    updateHoverLine(strike);
-                                }
-                            }
-                        });
-                    })
-                    .catch(err => {
-                        console.error("Error creating plot:", err);
+            // Create new plot
+            Plotly.newPlot('options-plot', plotData, layout, {
+                responsive: true,
+                displayModeBar: false
+            })
+                .then(plot => {
+                    state.plot = plot;
+                    
+                    // Add hover event
+                    plot.on('plotly_hover', function(data) {
+                        const strike = data.points[0].x;
+                        state.hoveredStrike = strike;
+                        updateHoverLine(strike);
                     });
-            } catch (err) {
-                console.error("Exception during plot creation:", err);
-            }
+                    
+                    // Add unhover event
+                    plot.on('plotly_unhover', function() {
+                        const atmStrike = findAtmStrike(calls, puts, state.currentPrice);
+                        updateHoverLine(atmStrike);
+                    });
+                    
+                    // Initialize hover line at ATM strike
+                    const atmStrike = findAtmStrike(calls, puts, state.currentPrice);
+                    updateHoverLine(atmStrike);
+                })
+                .catch(err => {
+                    console.error("Error creating plot:", err);
+                    showError("Failed to create the plot. Please try again.");
+                });
         } else {
-            console.log("Updating existing plot");
-            try {
-                Plotly.react('options-plot', data, layout)
-                    .catch(err => {
-                        console.error("Error updating plot:", err);
-                    });
-            } catch (err) {
-                console.error("Exception during plot update:", err);
-            }
+            // Update existing plot
+            Plotly.react('options-plot', plotData, layout, {
+                responsive: true,
+                displayModeBar: false
+            })
+                .then(() => {
+                    // Update hover line to ATM strike after plot update
+                    const atmStrike = findAtmStrike(calls, puts, state.currentPrice);
+                    updateHoverLine(atmStrike);
+                })
+                .catch(err => {
+                    console.error("Error updating plot:", err);
+                    showError("Failed to update the plot. Please try again.");
+                });
         }
-        
     } catch (error) {
-        console.error('Error updating plot:', error);
+        console.error("Error updating plot:", error);
+        showError(`Failed to update the plot: ${error.message}`);
     }
 }
 
 // Helper function to find the value at a specific strike
 function findValueAtStrike(data, strike, field) {
-    // Filter out null and NaN values first
+    // Filter out null, undefined and NaN values first
     const validData = data.filter(item => 
-        item.strike != null && 
-        item[field] != null && 
-        !isNaN(item[field]) && 
+        item.strike !== null && 
         item.strike !== undefined && 
-        item[field] !== undefined
+        !isNaN(item.strike) && 
+        item[field] !== null && 
+        item[field] !== undefined && 
+        !isNaN(item[field])
     );
     
     if (validData.length === 0) {
@@ -519,6 +574,36 @@ function findValueAtStrike(data, strike, field) {
     return interpolatedValue;
 }
 
+// Find the closest strike to the current price (at-the-money)
+function findAtmStrike(calls, puts, currentPrice) {
+    // Combine all strikes from calls and puts
+    const allStrikes = [...new Set([
+        ...calls.map(item => item.strike),
+        ...puts.map(item => item.strike)
+    ])].filter(strike => strike !== null && strike !== undefined && !isNaN(strike));
+    
+    if (allStrikes.length === 0) {
+        return currentPrice; // Default to current price if no strikes available
+    }
+    
+    // Sort strikes
+    allStrikes.sort((a, b) => a - b);
+    
+    // Find the closest strike to current price
+    let closestStrike = allStrikes[0];
+    let minDiff = Math.abs(currentPrice - closestStrike);
+    
+    for (let i = 1; i < allStrikes.length; i++) {
+        const diff = Math.abs(currentPrice - allStrikes[i]);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestStrike = allStrikes[i];
+        }
+    }
+    
+    return closestStrike;
+}
+
 // Show error message
 function showError(message) {
     if (elements.errorMessage) {
@@ -536,65 +621,38 @@ function hideError() {
 
 // Update hover line and information
 function updateHoverLine(strike) {
-    console.log(`Updating hover line for strike: ${strike}`);
-    if (!state.plot) {
-        console.error("Cannot update hover line: Plot not initialized");
-        return;
-    }
-    
     try {
-        // Get the plot data from the DOM element
         const plotDiv = document.getElementById('options-plot');
-        if (!plotDiv || !plotDiv.data) {
-            console.error("Cannot update hover line: Plot data not available");
-            return;
-        }
-        
-        const plotData = plotDiv.data;
+        if (!plotDiv || !plotDiv.data) return;
+
         const selectedPlotType = Array.from(elements.plotOptions).find(option => option.checked).value;
         const plotField = FIELD_MAPPING[selectedPlotType];
-        
-        // Get current date
         const currentDate = state.expiryDates[state.currentExpiryIndex];
-        
-        // Filter data for current expiry date
         const filteredData = state.optionsData.filter(item => item.expiration === currentDate);
-        
-        // Separate calls and puts
         const calls = filteredData.filter(item => item.option_type === 'call');
         const puts = filteredData.filter(item => item.option_type === 'put');
-        
-        // Find the call and put values at this strike
+
         const callData = calls.find(item => Math.abs(item.strike - strike) < 0.01);
         const putData = puts.find(item => Math.abs(item.strike - strike) < 0.01);
-        
-        // Update trace names with values
-        if (callData && callData[plotField] != null && !isNaN(callData[plotField])) {
-            const formattedValue = PRICE_FIELDS.includes(selectedPlotType) ? 
-                `$${callData[plotField].toFixed(2)}` : 
-                Number.isInteger(callData[plotField]) ? callData[plotField].toString() : callData[plotField].toFixed(2);
-            plotData[0].name = `Calls: ${formattedValue}`;
-        } else {
-            plotData[0].name = 'Calls: N/A';
-        }
-        
-        if (putData && putData[plotField] != null && !isNaN(putData[plotField])) {
-            const formattedValue = PRICE_FIELDS.includes(selectedPlotType) ? 
-                `$${putData[plotField].toFixed(2)}` : 
-                Number.isInteger(putData[plotField]) ? putData[plotField].toString() : putData[plotField].toFixed(2);
-            plotData[1].name = `Puts: ${formattedValue}`;
-        } else {
-            plotData[1].name = 'Puts: N/A';
-        }
-        
-        // Update strike line
-        plotData[2].name = `Strike: $${strike.toFixed(2)}`;
-        plotData[2].x = [strike, strike];
-        
-        Plotly.redraw('options-plot')
-            .catch(err => {
-                console.error("Error redrawing plot:", err);
-            });
+        const callValue = callData && callData[plotField] != null && !isNaN(callData[plotField]) ?
+            (PRICE_FIELDS.includes(selectedPlotType) ? `$${callData[plotField].toFixed(2)}` :
+            (Number.isInteger(callData[plotField]) ? callData[plotField].toString() : callData[plotField].toFixed(2))) : 'N/A';
+        const putValue = putData && putData[plotField] != null && !isNaN(putData[plotField]) ?
+            (PRICE_FIELDS.includes(selectedPlotType) ? `$${putData[plotField].toFixed(2)}` :
+            (Number.isInteger(putData[plotField]) ? putData[plotField].toString() : putData[plotField].toFixed(2))) : 'N/A';
+
+        const yMax = Math.max(...calls.map(item => item[plotField] || 0), ...puts.map(item => item[plotField] || 0)) * 1.1;
+
+        Plotly.restyle('options-plot', {
+            name: [`Calls: ${callValue}`, `Puts: ${putValue}`]
+        }, [0, 1]);
+
+        Plotly.restyle('options-plot', {
+            x: [[strike, strike]],
+            y: [[0, yMax]],
+            name: [`Strike: $${strike.toFixed(2)}`],
+            visible: [true]
+        }, [3]);
     } catch (error) {
         console.error('Error updating hover line:', error);
     }
@@ -610,7 +668,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (state.optionsData && state.optionsData.length > 0 && state.plot) {
             try {
                 Plotly.relayout('options-plot', {
-                    autosize: true
+                    autosize: true,
+                    displayModeBar: false
                 }).catch(err => {
                     console.error("Error resizing plot:", err);
                 });

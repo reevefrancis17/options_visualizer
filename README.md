@@ -88,31 +88,34 @@ This application fetches real-time options data from Yahoo Finance using the `yf
 The application uses a robust SQLite-based caching system to store options data locally:
 
 - **Persistent Storage**: Options data is cached in a SQLite database for improved performance and reduced API calls
-- **Crash Recovery**: The cache uses Write-Ahead Logging (WAL) to ensure data integrity even in case of crashes
+- **Automatic Refresh**: Cache entries older than 10 minutes are automatically refreshed in the background
+- **Non-Blocking**: Stale cache entries are still returned while a refresh happens in the background
+- **Shared Cache**: Both frontend and backend use the same cache to minimize API calls
+- **Background Polling**: The entire cache is refreshed every 10 minutes to keep data current
+- **Persistent Size**: The cache never shrinks, ensuring historical data remains available
 - **Progressive Loading**: Partial data is cached immediately, allowing the UI to update as data is fetched
-- **Automatic Maintenance**: Expired cache entries are automatically cleaned up to optimize storage
 
 ### Cache Management
 
-You can manage the cache using the included utility script:
+You can manage the cache using the backend API:
 
 ```bash
-# Show cache statistics
-python python/cache_utils.py stats
+# Get cache statistics
+curl http://localhost:5002/api/cache/stats
 
-# Clear the cache for a specific ticker
-python python/cache_utils.py clear --ticker SPY
+# View available tickers in the cache
+curl http://localhost:5002/api/tickers
 
-# Clear the entire cache
-python python/cache_utils.py clear
+# Add a ticker to the watchlist (will be cached)
+curl -X POST -H "Content-Type: application/json" -d '{"ticker":"AAPL"}' http://localhost:5002/api/tickers/add
 
-# Run cache maintenance (remove expired entries)
-python python/cache_utils.py maintenance
+# Remove a ticker from the watchlist
+curl -X POST -H "Content-Type: application/json" -d '{"ticker":"AAPL"}' http://localhost:5002/api/tickers/remove
 ```
 
 The cache is stored in a platform-specific location:
 - **Windows**: `%APPDATA%\options_visualizer\options_cache.db`
-- **macOS/Linux**: `~/.cache/options_visualizer/options_cache.db`
+- **macOS/Linux**: `~/.cache/options_visualizer\options_cache.db`
 
 ## Troubleshooting
 
@@ -134,3 +137,30 @@ The application includes a health check endpoint at `/health` that returns the c
 - Some stocks might have limited options data available
 - The application will load all available expiration dates for a ticker
 - The progressive loading feature allows you to see and interact with partial data while more is being fetched
+
+## Running the Application
+
+### Standard Run
+
+To run the application with both frontend and backend on separate threads:
+
+```bash
+python main.py
+```
+
+This will:
+- Start the backend API server on port 5002 (or the port specified in the BACKEND_PORT environment variable)
+- Start the frontend web server on port 5001 (or the port specified in the PORT environment variable)
+
+### Environment Variables
+
+You can customize the application using these environment variables:
+
+- `PORT`: Frontend web server port (default: 5001)
+- `BACKEND_PORT`: Backend API server port (default: 5002)
+- `BACKEND_URL`: Backend API URL (default: http://localhost:5002)
+
+Example:
+```bash
+PORT=8080 BACKEND_PORT=8081 python main.py
+```

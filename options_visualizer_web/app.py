@@ -3,10 +3,12 @@ import sys
 import json
 import logging
 import numpy as np
+import requests
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime
 import pandas as pd
 import math
+from flask_cors import CORS
 
 # Fix the path modification
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # Points to project root
@@ -46,19 +48,31 @@ logger.info("Starting Options Visualizer Web App")
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            logger.debug(f"Converting NaN/Inf value to None in JSON encoder")
             return None
         return super().default(obj)
 
 # Create Flask app with explicit static folder path
 static_folder = os.path.join(os.path.dirname(__file__), 'static')
 template_folder = os.path.join(os.path.dirname(__file__), 'templates')
-app = Flask(__name__, static_folder=static_folder, template_folder=template_folder)
+app = Flask(__name__, 
+           static_folder=static_folder, 
+           static_url_path='/static',
+           template_folder=template_folder)
 app.json_encoder = CustomJSONEncoder  # Use our custom encoder
+
+# Enable CORS for all routes
+CORS(app)
+
 logger.info(f"Static folder: {static_folder}")
 logger.info(f"Template folder: {template_folder}")
 
 # Initialize the options data manager with a longer cache duration for web app
-data_manager = OptionsDataManager(cache_duration=600)  # 10 minutes cache
+# This will be overridden by the shared instance from main.py
+data_manager = None
+
+# Backend API URL
+BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:5002')
 
 @app.route('/')
 def index():
@@ -80,6 +94,29 @@ def get_options_data():
         
         logger.info(f"Processing request for {symbol}")
         
+        # Use the shared data manager from main.py if available
+        global data_manager
+        if data_manager is None:
+            # Import the shared instance from main.py
+            try:
+                from main import options_data_manager
+                data_manager = options_data_manager
+                logger.info("Using shared options data manager from main.py")
+            except ImportError:
+                # Fall back to creating a new instance if not running from main.py
+                data_manager = OptionsDataManager(cache_duration=600)
+                logger.info("Created new options data manager (not running from main.py)")
+        
+        # Try to get data from backend first
+        try:
+            backend_response = requests.get(f"{BACKEND_URL}/api/options/{symbol}", timeout=2)
+            if backend_response.status_code == 200:
+                logger.info(f"Successfully retrieved data from backend for {symbol}")
+                return jsonify(backend_response.json())
+        except requests.RequestException as e:
+            logger.warning(f"Failed to connect to backend: {str(e)}. Falling back to local data.")
+        
+        # If backend request fails, fall back to local data processing
         # Get current processor status from cache
         processor, current_price, status, progress = data_manager.get_current_processor(symbol)
         
@@ -133,6 +170,10 @@ def get_options_data():
         # Additional check for object columns that might contain 'NaN' strings
         for col in df.select_dtypes(include=['object']).columns:
             df[col] = df[col].replace('NaN', None)
+        
+        # Additional check for numeric columns to ensure NaN values are properly handled
+        for col in df.select_dtypes(include=['float', 'int']).columns:
+            df[col] = df[col].apply(lambda x: None if pd.isna(x) or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))) else x)
         
         # Convert to records and check for any remaining NaN values
         data_records = df.to_dict(orient='records')
