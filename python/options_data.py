@@ -166,39 +166,60 @@ class OptionsDataManager:
         return None, None, 'not_found', 0.0
 
     def start_fetching(self, ticker: str, skip_interpolation: bool = False) -> bool:
-        """Start fetching data in the background if not already loading.
+        """Start fetching options data for a ticker in the background.
         
         Args:
             ticker: The stock ticker symbol
-            skip_interpolation: Whether to skip interpolation for faster processing during immediate use.
-                               Note: The cached data will always be fully interpolated regardless of this setting.
+            skip_interpolation: DEPRECATED - Always uses 2D interpolation now
             
         Returns:
-            bool: True if fetching started, False if already in progress
+            True if fetch started, False otherwise
         """
-        # Use a lock to prevent multiple threads from starting fetches for the same ticker
-        if ticker not in self._fetch_locks:
-            self._fetch_locks[ticker] = threading.Lock()
+        # Always use 2D interpolation for better data quality
+        skip_interpolation = False
+        
+        # Check if already fetching
+        if ticker in self._loading_state:
+            logger.info(f"Already fetching data for {ticker}")
+            return False
             
-        with self._fetch_locks[ticker]:
-            if ticker in self._loading_state:
-                logger.info(f"Fetch already in progress for {ticker}")
-                return False
-                
-            self._loading_state[ticker] = {
-                'last_processed_dates': 0, 
-                'total_dates': 0,
-                'skip_interpolation': skip_interpolation
-            }
-            thread = threading.Thread(target=self._fetch_in_background, args=(ticker,))
-            thread.daemon = True  # Make thread exit when main thread exits
-            thread.start()
-            logger.info(f"Started background fetch for {ticker} (skip_interpolation={skip_interpolation} for immediate use only, cached data will be fully interpolated)")
-            return True
+        # Set initial loading state
+        self._loading_state[ticker] = {
+            'status': 'loading',
+            'progress': 0.0,
+            'processed_dates': 0,
+            'total_dates': 0,
+            'skip_interpolation': skip_interpolation
+        }
+        thread = threading.Thread(target=self._fetch_in_background, args=(ticker,))
+        thread.daemon = True  # Make thread exit when main thread exits
+        thread.start()
+        logger.info(f"Started background fetch for {ticker} with 2D interpolation")
+        return True
 
     def _fetch_in_background(self, ticker: str):
-        """Fetch data in a background thread."""
+        """Fetch options data in a background thread."""
+        logger.info(f"Starting background fetch for {ticker}")
+        
+        # Set loading state
+        self._loading_state[ticker] = {
+            'status': 'loading',
+            'progress': 0.0,
+            'processed_dates': 0,
+            'total_dates': 0
+        }
+        
         try:
+            # Create a new thread for fetching
+            thread = threading.Thread(
+                target=self._fetch_options_data,
+                args=(ticker,),
+                daemon=True
+            )
+            thread.start()
+            logger.info(f"Background fetch thread started for {ticker}")
+            return True
+        except Exception as e:
             # Use a lock to prevent multiple threads from fetching the same ticker
             if ticker not in self._fetch_locks:
                 self._fetch_locks[ticker] = threading.Lock()
@@ -290,6 +311,26 @@ class OptionsDataManager:
                         
                         # Add a flag to indicate this data is fully interpolated
                         processed_data['_is_fully_interpolated'] = True
+                        
+                        # Ensure all plot types are calculated and available
+                        # This is critical for frontend performance
+                        all_fields_available = True
+                        required_fields = [
+                            'mid_price', 'delta', 'gamma', 'theta', 'impliedVolatility',
+                            'volume', 'spread', 'intrinsic_value', 'extrinsic_value'
+                        ]
+                        
+                        for field in required_fields:
+                            if field not in processed_data.data_vars:
+                                logger.warning(f"Field {field} is missing from processed data")
+                                all_fields_available = False
+                        
+                        if not all_fields_available:
+                            logger.warning(f"Some required plot fields are missing - forcing post-processing")
+                            # Force post-processing to ensure all fields are available
+                            processor._ensure_all_plot_fields()
+                            processor.apply_floors()
+                            processed_data = processor.options_data
                         
                         # Final update to cache with fully processed data
                         self._cache.set(ticker, processed_data, final_current_price, processed_dates, total_dates)
@@ -1007,15 +1048,28 @@ class OptionsDataProcessor:
                             sigma = 1.0
                         elif dte <= 365:  # Longer-dated options (3-12 months)
                             sigma = 1.5
-                        else:  # LEAPS (> 1 year)
-                            # Reduce excessive smoothing for LEAPS
-                            sigma = 1.5 + min(1.5, (dte / 730.0))  # Cap the smoothing for very long-dated options
+                        elif dte <= 730:  # 1-2 years
+                            sigma = 2.0
+                        else:  # LEAPS (> 2 years)
+                            # Progressive smoothing for very long-dated options
+                            base_sigma = 2.5
+                            # Add additional smoothing based on DTE, with a cap
+                            additional_sigma = min(2.5, (dte - 730) / 365.0)
+                            sigma = base_sigma + additional_sigma
                         
                         # Apply 1D Gaussian smoothing to this DTE slice
                         interpolated_values_reshaped[:, i] = gaussian_filter(
                             interpolated_values_reshaped[:, i], 
                             sigma=sigma
                         )
+                        
+                        # For very long-dated options, apply a second pass with a larger window
+                        if dte > 730:
+                            # Second pass with larger sigma for extreme smoothing of LEAPS
+                            interpolated_values_reshaped[:, i] = gaussian_filter(
+                                interpolated_values_reshaped[:, i], 
+                                sigma=sigma * 0.5  # Half the sigma for second pass
+                            )
                     
                     # Keep the reshaped version (don't flatten back)
                     interpolated_values = interpolated_values_reshaped
@@ -1127,12 +1181,28 @@ class OptionsDataProcessor:
             # This helps reduce oscillations in the final prices
             from scipy.ndimage import gaussian_filter
             for j, dte in enumerate(dtes):
-                if dte > 365:  # Only apply to LEAPS
-                    # Adaptive sigma based on time to expiry
-                    price_sigma = 0.5 + (dte / 1000.0)
-                    theoretical_prices[:, j] = gaussian_filter(theoretical_prices[:, j], sigma=price_sigma)
-                    # Recalculate extrinsic after smoothing
-                    extrinsic_values[:, j] = np.maximum(0, theoretical_prices[:, j] - intrinsic_values[:, j])
+                if dte <= 365:  # Apply light smoothing to all options
+                    price_sigma = 0.3
+                elif dte <= 730:  # 1-2 years
+                    price_sigma = 0.8
+                else:  # > 2 years
+                    # Progressive smoothing based on time to expiry
+                    base_sigma = 1.0
+                    additional_sigma = min(2.0, (dte - 730) / 365.0)
+                    price_sigma = base_sigma + additional_sigma
+                
+                # Apply smoothing to prices
+                theoretical_prices[:, j] = gaussian_filter(theoretical_prices[:, j], sigma=price_sigma)
+                
+                # For very long-dated options, apply a second pass
+                if dte > 730:
+                    theoretical_prices[:, j] = gaussian_filter(
+                        theoretical_prices[:, j], 
+                        sigma=price_sigma * 0.5  # Half the sigma for second pass
+                    )
+                
+                # Recalculate extrinsic after smoothing
+                extrinsic_values[:, j] = np.maximum(0, theoretical_prices[:, j] - intrinsic_values[:, j])
             
             # Step 3: Calculate average spread per expiration date for bid/ask
             da_bid = self.ds['bid'].sel(option_type=opt_type)
@@ -1220,6 +1290,7 @@ class OptionsDataProcessor:
         3. Calculate spread (ask - bid)
         4. Calculate greeks if dimensions are present
         5. Apply floors and rounding
+        6. Ensure all plot types are calculated and available
         """
         logger.info("Post-processing data after interpolation")
         
@@ -1294,6 +1365,9 @@ class OptionsDataProcessor:
             else:
                 logger.warning("Cannot calculate greeks: missing required dimensions")
             
+            # Ensure all required fields for plotting are available
+            self._ensure_all_plot_fields()
+            
             # Apply floors to ensure all values are reasonable
             self.apply_floors()
             
@@ -1305,6 +1379,38 @@ class OptionsDataProcessor:
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Continue with what we have
             return self.ds
+            
+    def _ensure_all_plot_fields(self):
+        """Ensure all fields needed for plotting are available in the dataset."""
+        logger.info("Ensuring all plot fields are available")
+        
+        # Define all fields needed for plotting
+        required_fields = {
+            'mid_price': 0.05,      # Price
+            'delta': 0,             # Delta
+            'gamma': 0,             # Gamma
+            'theta': 0,             # Theta
+            'impliedVolatility': 0.3, # IV
+            'volume': 0,            # Volume
+            'spread': 0.05,         # Spread
+            'intrinsic_value': 0,   # Intrinsic Value
+            'extrinsic_value': 0    # Extrinsic Value
+        }
+        
+        # Check each field and add if missing
+        for field, default_value in required_fields.items():
+            if field not in self.ds.data_vars:
+                logger.info(f"Adding missing field: {field}")
+                # Create a new data variable with the same dimensions as 'price'
+                if 'price' in self.ds.data_vars:
+                    # Copy dimensions from price
+                    self.ds[field] = self.ds['price'].copy()
+                    # Fill with default value
+                    self.ds[field].values.fill(default_value)
+                else:
+                    logger.warning(f"Cannot add {field}: 'price' field not available for dimension reference")
+        
+        logger.info("All plot fields are now available")
 
     def calculate_black_scholes_greeks(self):
         """Calculate option greeks using Black-Scholes formulas."""
@@ -1331,8 +1437,13 @@ class OptionsDataProcessor:
             # Import the Black-Scholes functions
             from python.models.black_scholes import delta, gamma, theta
             
-            # Loop through each option type, strike, and DTE
+            # Process each option type separately to avoid indexing issues
             for i, opt_type in enumerate(option_types):
+                # Create temporary arrays for this option type
+                opt_delta = np.zeros((len(strikes), len(dtes)))
+                opt_gamma = np.zeros((len(strikes), len(dtes)))
+                opt_theta = np.zeros((len(strikes), len(dtes)))
+                
                 for j, strike in enumerate(strikes):
                     for k, dte in enumerate(dtes):
                         try:
@@ -1367,15 +1478,25 @@ class OptionsDataProcessor:
                                 T = 10.0
                             
                             # Calculate delta
-                            delta_array[j, k, i] = delta(S, strike, T, r, sigma, opt_type)
+                            opt_delta[j, k] = delta(S, strike, T, r, sigma, opt_type)
                             
                             # Calculate gamma (same for calls and puts)
-                            gamma_array[j, k, i] = gamma(S, strike, T, r, sigma)
+                            opt_gamma[j, k] = gamma(S, strike, T, r, sigma)
                             
                             # Calculate theta (daily)
-                            theta_array[j, k, i] = theta(S, strike, T, r, sigma, opt_type) / 365.0
+                            # Use a larger divisor for very long-dated options to avoid numerical issues
+                            divisor = 365.0
+                            if dte > 730:  # For options > 2 years
+                                divisor = 365.0 * (1 + (dte - 730) / 3650)  # Gradually increase divisor
+                            
+                            opt_theta[j, k] = theta(S, strike, T, r, sigma, opt_type) / divisor
                         except Exception as e:
                             logger.debug(f"Error calculating greeks for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+                
+                # Assign the calculated values to the main arrays
+                delta_array[:, :, i] = opt_delta
+                gamma_array[:, :, i] = opt_gamma
+                theta_array[:, :, i] = opt_theta
             
             # Add or update the greeks in the dataset
             if 'delta' not in self.ds:
@@ -1392,6 +1513,30 @@ class OptionsDataProcessor:
                 self.ds['theta'] = (('strike', 'DTE', 'option_type'), theta_array)
             else:
                 self.ds['theta'].values = theta_array
+            
+            # Apply additional smoothing to delta and theta for long-dated options
+            # This helps reduce oscillations in the greeks
+            from scipy.ndimage import gaussian_filter
+            
+            for i, opt_type in enumerate(option_types):
+                for k, dte in enumerate(dtes):
+                    if dte > 365:  # Only apply to LEAPS
+                        # Adaptive sigma based on time to expiry
+                        greek_sigma = 0.5 + min(2.0, (dte / 730.0))
+                        
+                        # Apply smoothing to delta
+                        delta_array[:, k, i] = gaussian_filter(delta_array[:, k, i], sigma=greek_sigma)
+                        
+                        # Apply smoothing to theta
+                        theta_array[:, k, i] = gaussian_filter(theta_array[:, k, i], sigma=greek_sigma)
+                        
+                        # Apply smoothing to gamma
+                        gamma_array[:, k, i] = gaussian_filter(gamma_array[:, k, i], sigma=greek_sigma)
+            
+            # Update the dataset with smoothed values
+            self.ds['delta'].values = delta_array
+            self.ds['gamma'].values = gamma_array
+            self.ds['theta'].values = theta_array
             
             logger.info("Successfully calculated Black-Scholes greeks")
         except Exception as e:
@@ -1575,7 +1720,7 @@ class OptionsDataProcessor:
             num_dates = len(self.get_expirations())
             logger.info(f"Found {num_dates} expiration dates")
             
-            # First try 2D interpolation if we have multiple dates
+            # Only perform 2D interpolation if we have multiple dates
             if num_dates >= 2:
                 logger.info("Performing 2D interpolation across all dates")
                 self.interpolate_missing_values_2d()
@@ -1584,34 +1729,15 @@ class OptionsDataProcessor:
                 missing_count = self.count_missing_values()
                 logger.info(f"After 2D interpolation: {missing_count} missing values")
                 
-                # If we still have missing values, try 1D interpolation for each date
+                # If we still have missing values, use default values instead of 1D interpolation
                 if missing_count > 0:
-                    logger.info("Performing 1D interpolation for each date to fill remaining gaps")
-                    for dte in self.ds.DTE.values:
-                        # Create a temporary processor with just this date
-                        temp_ds = self.ds.sel(DTE=dte)
-                        # We need to manually interpolate each date
-                        for opt_type in ['call', 'put']:
-                            for variable in ['bid', 'ask', 'mid_price', 'price', 'impliedVolatility']:
-                                if variable not in self.ds.data_vars:
-                                    continue
-                                    
-                                da = self.ds[variable].sel(option_type=opt_type, DTE=dte)
-                                if da.isnull().any():
-                                    strikes = da.strike.values
-                                    values = da.values
-                                    valid = ~np.isnan(values)
-                                    if np.sum(valid) >= 2:
-                                        s = pd.Series(values, index=strikes).interpolate(method='linear')
-                                        self.ds[variable].loc[{'option_type': opt_type, 'DTE': dte}] = s.values
-                                        logger.info(f"1D fallback interpolated {variable} for {opt_type} at DTE={dte}")
-            # If we only have one date, use 1D interpolation
-            elif num_dates == 1:
-                logger.info("Performing 1D interpolation for single date")
-                self.interpolate_missing_values_1d()
+                    logger.info("Setting default values for any remaining missing data")
+                    self._set_default_values_for_missing()
             else:
-                logger.warning("No expiration dates found, cannot interpolate")
-                return False
+                logger.warning("Need at least 2 expiration dates for 2D interpolation")
+                # For single date, we'll use default values instead of 1D interpolation
+                logger.info("Setting default values for single date")
+                self._set_default_values_for_missing()
                 
             # Apply floors to ensure all values are reasonable
             self.apply_floors()
@@ -1626,7 +1752,42 @@ class OptionsDataProcessor:
             logger.error(f"Error during forced reinterpolation: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
-    
+            
+    def _set_default_values_for_missing(self):
+        """Set default values for any missing data instead of using 1D interpolation."""
+        logger.info("Setting default values for missing data")
+        
+        if not self.ds:
+            return
+            
+        # Define default values for different fields
+        default_values = {
+            'bid': 0.05,
+            'ask': 0.10,
+            'mid_price': 0.075,
+            'price': 0.075,
+            'impliedVolatility': 0.3,  # 30% IV as default
+            'volume': 0,
+            'openInterest': 0,
+            'delta': 0,
+            'gamma': 0,
+            'theta': 0,
+            'spread': 0.05,
+            'extrinsic_value': 0,
+        }
+        
+        # Set default values for each field if missing
+        for field, default_value in default_values.items():
+            if field in self.ds.data_vars:
+                # Replace missing values with default
+                self.ds[field] = self.ds[field].fillna(default_value)
+                
+                # For impliedVolatility, also replace zeros or negative values
+                if field == 'impliedVolatility':
+                    self.ds[field] = xr.where(self.ds[field] <= 0, default_value, self.ds[field])
+                    
+        logger.info("Default values set for missing data")
+
     def count_missing_values(self):
         """Count the number of missing values in key fields."""
         if not self.ds:

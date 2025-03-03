@@ -13,6 +13,7 @@ import numpy as np
 import yfinance as yf
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS
+import traceback
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -144,9 +145,12 @@ def get_options(ticker):
         ticker = ticker.upper()
         logger.info(f"API request for options data: {ticker}")
         
-        # Check if we should skip interpolation (faster but less accurate)
-        # Default to False (do interpolation) for better data quality
-        skip_interpolation = request.args.get('skip_interpolation', 'false').lower() == 'true'
+        # Check for query parameters
+        dte_min = request.args.get('dte_min', None)
+        dte_max = request.args.get('dte_max', None)
+        
+        # Skip interpolation is no longer supported - always use 2D interpolation
+        skip_interpolation = False
         
         # Get the data manager
         manager = get_data_manager()
@@ -155,8 +159,7 @@ def get_options(ticker):
         processor, current_price, status, progress = manager.get_current_processor(ticker)
         
         if status == 'not_found':
-            # Start fetching in background with interpolation enabled by default for cache
-            # but respect skip_interpolation for immediate use
+            # Start fetching in background with interpolation enabled
             manager.start_fetching(ticker, skip_interpolation=skip_interpolation)
             return jsonify({
                 'status': 'loading',
@@ -186,6 +189,23 @@ def get_options(ticker):
                 'message': f'No options data available for {ticker}'
             }), 404
         
+        # Apply DTE filters if provided
+        if dte_min is not None:
+            try:
+                dte_min = float(dte_min)
+                df = df[df['DTE'] >= dte_min]
+                logger.info(f"Filtered options with DTE >= {dte_min}")
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid dte_min parameter: {dte_min}")
+                
+        if dte_max is not None:
+            try:
+                dte_max = float(dte_max)
+                df = df[df['DTE'] <= dte_max]
+                logger.info(f"Filtered options with DTE <= {dte_max}")
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid dte_max parameter: {dte_max}")
+        
         # Get expiration dates
         expiry_dates = processor.get_expirations()
         expiry_dates_str = [date.strftime('%Y-%m-%d') for date in expiry_dates]
@@ -205,17 +225,41 @@ def get_options(ticker):
         for col in df.select_dtypes(include=['float', 'int']).columns:
             df[col] = df[col].apply(lambda x: None if pd.isna(x) or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))) else x)
         
-        # Convert to records - use a more efficient approach for large datasets
+        # For very large datasets, optimize the response
         if len(df) > 10000:
             # For very large datasets, only include essential columns
             essential_cols = [
-                'strike', 'expiration', 'option_type', 'bid', 'ask', 'mid_price', 
-                'price', 'intrinsic_value', 'extrinsic_value', 'impliedVolatility',
-                'volume', 'openInterest', 'DTE', 'delta', 'gamma', 'theta', 'spread'
+                'strike', 'expiration', 'option_type', 'DTE', 
+                'mid_price', 'delta', 'gamma', 'theta', 'impliedVolatility',
+                'volume', 'spread', 'intrinsic_value', 'extrinsic_value'
             ]
             df = df[[col for col in essential_cols if col in df.columns]]
+            
+            # Round numeric columns to reduce payload size
+            for col in df.select_dtypes(include=['float']).columns:
+                if col in ['delta', 'gamma', 'theta']:
+                    df[col] = df[col].round(4)  # 4 decimal places for greeks
+                elif col == 'impliedVolatility':
+                    df[col] = df[col].round(3)  # 3 decimal places for IV
+                else:
+                    df[col] = df[col].round(2)  # 2 decimal places for prices
         
-        data_records = df.to_dict(orient='records')
+        # Convert to records with chunking for large datasets
+        if len(df) > 50000:
+            # For extremely large datasets, chunk the response
+            chunk_size = 10000
+            data_records = []
+            
+            for i in range(0, len(df), chunk_size):
+                chunk = df.iloc[i:i+chunk_size]
+                data_records.extend(chunk.to_dict(orient='records'))
+                
+                # Force garbage collection after each chunk
+                import gc
+                gc.collect()
+        else:
+            # For smaller datasets, convert all at once
+            data_records = df.to_dict(orient='records')
         
         # Prepare response
         response = {
@@ -234,10 +278,36 @@ def get_options(ticker):
         if status == 'partial':
             response['message'] = 'Using cached data while refreshing in background'
         
-        return jsonify(response)
+        # Use a streaming response for large datasets to avoid memory issues
+        if len(data_records) > 50000:
+            def generate():
+                # Yield the response in chunks
+                yield '{'
+                
+                # Add all fields except options_data
+                fields = {k: v for k, v in response.items() if k != 'options_data'}
+                yield json.dumps(fields)[1:-1] + ','  # Remove { and } and add comma
+                
+                # Start options_data array
+                yield '"options_data": ['
+                
+                # Yield each record
+                for i, record in enumerate(data_records):
+                    if i > 0:
+                        yield ','
+                    yield json.dumps(record)
+                
+                # Close options_data array and response
+                yield ']}'
+            
+            return Response(generate(), mimetype='application/json')
+        else:
+            # For smaller datasets, use standard jsonify
+            return jsonify(response)
     
     except Exception as e:
         logger.error(f"Error processing request for {ticker}: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             'status': 'error',
             'message': str(e)
