@@ -1008,7 +1008,8 @@ class OptionsDataProcessor:
                         elif dte <= 365:  # Longer-dated options (3-12 months)
                             sigma = 1.5
                         else:  # LEAPS (> 1 year)
-                            sigma = 2.0 + (dte / 365.0)  # Increase smoothing with time to expiry
+                            # Reduce excessive smoothing for LEAPS
+                            sigma = 1.5 + min(1.5, (dte / 730.0))  # Cap the smoothing for very long-dated options
                         
                         # Apply 1D Gaussian smoothing to this DTE slice
                         interpolated_values_reshaped[:, i] = gaussian_filter(
@@ -1046,7 +1047,8 @@ class OptionsDataProcessor:
                             elif dte <= 365:
                                 sigma = 1.2
                             else:
-                                sigma = 1.5 + (dte / 365.0)
+                                # Reduce excessive smoothing for LEAPS
+                                sigma = 1.2 + min(1.0, (dte / 730.0))
                             
                             interpolated_values_reshaped[:, i] = gaussian_filter(
                                 interpolated_values_reshaped[:, i], 
@@ -1212,62 +1214,189 @@ class OptionsDataProcessor:
 
     def post_process_data(self):
         """
-        Apply final processing steps to ensure data consistency:
-        1. Recalculate intrinsic and extrinsic values based on current price
-        2. Apply floors and rounding to ensure reasonable values
-        3. Calculate greeks
+        Post-process the data after interpolation:
+        1. Recalculate intrinsic values based on current price
+        2. Calculate extrinsic value
+        3. Calculate spread (ask - bid)
+        4. Calculate greeks if dimensions are present
+        5. Apply floors and rounding
         """
-        logger.info("Applying post-processing steps")
+        logger.info("Post-processing data after interpolation")
         
         try:
+            # Get current price
+            current_price = self.current_price
+            
             # Recalculate intrinsic values based on current price
-            S = self.current_price
-            strikes = self.ds.strike.values
+            # For calls: max(0, S - K)
+            # For puts: max(0, K - S)
             
-            # Calculate intrinsic values for calls and puts
-            for opt_type in ['call', 'put']:
-                if opt_type == 'call':
-                    # For calls: max(0, S - K)
-                    intrinsic = xr.DataArray(
-                        np.maximum(0, S - strikes[:, np.newaxis]),
-                        dims=['strike', 'DTE'],
-                        coords={'strike': strikes, 'DTE': self.ds.DTE.values}
-                    )
-                else:
-                    # For puts: max(0, K - S)
-                    intrinsic = xr.DataArray(
-                        np.maximum(0, strikes[:, np.newaxis] - S),
-                        dims=['strike', 'DTE'],
-                        coords={'strike': strikes, 'DTE': self.ds.DTE.values}
-                    )
+            # Create option type masks that match the dataset dimensions
+            call_indices = np.where(np.array(self.ds.option_type.values) == 'call')[0]
+            put_indices = np.where(np.array(self.ds.option_type.values) == 'put')[0]
+            
+            # Calculate intrinsic values for each option type separately
+            if 'intrinsic_value' in self.ds:
+                # For calls
+                if len(call_indices) > 0:
+                    call_data = self.ds.isel(option_type=call_indices)
+                    # Ensure proper broadcasting by explicitly creating the array with correct dimensions
+                    call_intrinsic = np.maximum(0, current_price - call_data.strike.values[:, np.newaxis])
+                    # Ensure the shape matches the expected dimensions
+                    if call_intrinsic.shape != self.ds['intrinsic_value'].sel(option_type='call').shape:
+                        # Reshape to match the expected dimensions
+                        call_intrinsic = np.broadcast_to(
+                            call_intrinsic, 
+                            self.ds['intrinsic_value'].sel(option_type='call').shape
+                        )
+                    self.ds['intrinsic_value'].loc[{'option_type': 'call'}] = call_intrinsic
                 
-                # Update intrinsic values in the dataset
-                self.ds['intrinsic_value'].loc[{'option_type': opt_type}] = intrinsic.values
+                # For puts
+                if len(put_indices) > 0:
+                    put_data = self.ds.isel(option_type=put_indices)
+                    # Ensure proper broadcasting by explicitly creating the array with correct dimensions
+                    put_intrinsic = np.maximum(0, put_data.strike.values[:, np.newaxis] - current_price)
+                    # Ensure the shape matches the expected dimensions
+                    if put_intrinsic.shape != self.ds['intrinsic_value'].sel(option_type='put').shape:
+                        # Reshape to match the expected dimensions
+                        put_intrinsic = np.broadcast_to(
+                            put_intrinsic, 
+                            self.ds['intrinsic_value'].sel(option_type='put').shape
+                        )
+                    self.ds['intrinsic_value'].loc[{'option_type': 'put'}] = put_intrinsic
             
-            # Recalculate extrinsic values
-            self.ds['extrinsic_value'] = self.ds['price'] - self.ds['intrinsic_value']
-            self.ds['extrinsic_value'] = xr.where(self.ds['extrinsic_value'] < 0, 0, self.ds['extrinsic_value'])
+            # Calculate extrinsic value (price - intrinsic)
+            if 'extrinsic_value' in self.ds and 'price' in self.ds and 'intrinsic_value' in self.ds:
+                self.ds['extrinsic_value'] = self.ds['price'] - self.ds['intrinsic_value']
+                # Ensure extrinsic value is not negative
+                self.ds['extrinsic_value'] = xr.where(self.ds['extrinsic_value'] < 0, 0, self.ds['extrinsic_value'])
             
-            # Calculate spread
-            self.ds['spread'] = self.ds['ask'] - self.ds['bid']
+            # Calculate spread (ask - bid)
+            if 'ask' in self.ds and 'bid' in self.ds:
+                self.ds['spread'] = self.ds['ask'] - self.ds['bid']
             
-            # Compute greeks if we have the necessary dimensions
-            if 'DTE' in self.ds.dims and 'strike' in self.ds.dims and 'option_type' in self.ds.dims:
+            # Calculate greeks if we have the necessary dimensions
+            if 'strike' in self.ds.dims and 'DTE' in self.ds.dims and 'option_type' in self.ds.dims:
                 try:
-                    self.compute_delta()
-                    self.compute_gamma()
-                    self.compute_theta()
+                    # Calculate greeks using Black-Scholes model
+                    self.calculate_black_scholes_greeks()
                 except Exception as e:
-                    logger.error(f"Error computing greeks: {str(e)}")
+                    logger.error(f"Error computing Black-Scholes greeks: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    
+                    # Fallback to numerical greeks
+                    try:
+                        self.compute_delta()
+                        self.compute_gamma()
+                        self.compute_theta()
+                    except Exception as e:
+                        logger.error(f"Error computing numerical greeks: {str(e)}")
+            else:
+                logger.warning("Cannot calculate greeks: missing required dimensions")
             
-            # Apply floors as the last step to catch unreasonably small values after interpolation
+            # Apply floors to ensure all values are reasonable
             self.apply_floors()
+            
+            logger.info("Post-processing complete")
+            return self.ds
             
         except Exception as e:
             logger.error(f"Error in post-processing: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        logger.info("Post-processing complete")
+            # Continue with what we have
+            return self.ds
+
+    def calculate_black_scholes_greeks(self):
+        """Calculate option greeks using Black-Scholes formulas."""
+        try:
+            # Get required parameters
+            S = self.current_price  # Current price
+            r = self.get_risk_free_rate()  # Risk-free rate
+            
+            # Check if we have the necessary dimensions and data
+            if 'impliedVolatility' not in self.ds:
+                logger.warning("Cannot calculate Black-Scholes greeks: missing implied volatility data")
+                return
+                
+            # Get the shape of the dataset
+            strikes = self.ds.strike.values
+            dtes = self.ds.DTE.values
+            option_types = self.ds.option_type.values
+            
+            # Create arrays to store the greeks
+            delta_array = np.zeros((len(strikes), len(dtes), len(option_types)))
+            gamma_array = np.zeros((len(strikes), len(dtes), len(option_types)))
+            theta_array = np.zeros((len(strikes), len(dtes), len(option_types)))
+            
+            # Import the Black-Scholes functions
+            from python.models.black_scholes import delta, gamma, theta
+            
+            # Loop through each option type, strike, and DTE
+            for i, opt_type in enumerate(option_types):
+                for j, strike in enumerate(strikes):
+                    for k, dte in enumerate(dtes):
+                        try:
+                            # Get implied volatility for this option
+                            sigma = self.ds['impliedVolatility'].sel(
+                                strike=strike, 
+                                DTE=dte, 
+                                option_type=opt_type
+                            ).item()
+                            
+                            # Skip if implied volatility is invalid
+                            if np.isnan(sigma) or sigma <= 0:
+                                # Use a reasonable default for long-dated options
+                                if dte > 365:
+                                    sigma = 0.2  # 20% IV as a reasonable default for LEAPS
+                                else:
+                                    continue
+                            
+                            # Cap extremely high IVs that can cause numerical issues
+                            if sigma > 2.0:  # Cap at 200%
+                                sigma = 2.0
+                            
+                            # Time to expiration in years
+                            T = dte / 365.0
+                            
+                            # Skip if time to expiration is too small
+                            if T <= 0.001:
+                                continue
+                                
+                            # For very long-dated options, cap T to avoid numerical issues
+                            if T > 10.0:
+                                T = 10.0
+                            
+                            # Calculate delta
+                            delta_array[j, k, i] = delta(S, strike, T, r, sigma, opt_type)
+                            
+                            # Calculate gamma (same for calls and puts)
+                            gamma_array[j, k, i] = gamma(S, strike, T, r, sigma)
+                            
+                            # Calculate theta (daily)
+                            theta_array[j, k, i] = theta(S, strike, T, r, sigma, opt_type) / 365.0
+                        except Exception as e:
+                            logger.debug(f"Error calculating greeks for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+            
+            # Add or update the greeks in the dataset
+            if 'delta' not in self.ds:
+                self.ds['delta'] = (('strike', 'DTE', 'option_type'), delta_array)
+            else:
+                self.ds['delta'].values = delta_array
+                
+            if 'gamma' not in self.ds:
+                self.ds['gamma'] = (('strike', 'DTE', 'option_type'), gamma_array)
+            else:
+                self.ds['gamma'].values = gamma_array
+                
+            if 'theta' not in self.ds:
+                self.ds['theta'] = (('strike', 'DTE', 'option_type'), theta_array)
+            else:
+                self.ds['theta'].values = theta_array
+            
+            logger.info("Successfully calculated Black-Scholes greeks")
+        except Exception as e:
+            logger.error(f"Error in calculate_black_scholes_greeks: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     def compute_delta(self):
         """Compute delta (first derivative of price with respect to strike)."""
@@ -1313,11 +1442,12 @@ class OptionsDataProcessor:
         Apply floors and rounding to ensure reasonable values after interpolation:
         1. Apply a floor of zero to all numeric values
         2. Round all dollar-denominated fields to the nearest $0.05
+        3. Apply specific constraints to greeks and other fields
         """
         logger.info("Applying floors and rounding to ensure reasonable values after interpolation")
         
         # Define dollar-denominated fields that need rounding to nearest $0.05
-        dollar_fields = ['bid', 'ask', 'mid_price', 'price', 'intrinsic_value', 'extrinsic_value']
+        dollar_fields = ['bid', 'ask', 'mid_price', 'price', 'intrinsic_value', 'extrinsic_value', 'spread']
         
         # Apply floor of zero to all numeric fields
         for field in self.ds.data_vars:
@@ -1331,11 +1461,17 @@ class OptionsDataProcessor:
                     self.ds[field] = (self.ds[field] * 20).round() / 20
                     logger.debug(f"Applied zero floor and $0.05 rounding to {field}")
         
-        # Special handling for implied volatility - floor at 0.01
-        iv_mask = (self.ds['impliedVolatility'].isnull() | (self.ds['impliedVolatility'] < 0.01))
-        if iv_mask.any():
-            logger.info(f"Applying floor to {iv_mask.sum().item()} implied volatility values")
-            self.ds['impliedVolatility'] = xr.where(iv_mask, 0.01, self.ds['impliedVolatility'])
+        # Special handling for implied volatility - floor at 0.01 and cap at 5.0
+        iv_mask_low = (self.ds['impliedVolatility'].isnull() | (self.ds['impliedVolatility'] < 0.01))
+        iv_mask_high = (self.ds['impliedVolatility'] > 5.0)
+        
+        if iv_mask_low.any():
+            logger.info(f"Applying floor to {iv_mask_low.sum().item()} implied volatility values")
+            self.ds['impliedVolatility'] = xr.where(iv_mask_low, 0.01, self.ds['impliedVolatility'])
+            
+        if iv_mask_high.any():
+            logger.info(f"Capping {iv_mask_high.sum().item()} high implied volatility values")
+            self.ds['impliedVolatility'] = xr.where(iv_mask_high, 5.0, self.ds['impliedVolatility'])
         
         # Ensure ask >= bid
         ask_lt_bid_mask = self.ds['ask'] < self.ds['bid']
@@ -1350,6 +1486,45 @@ class OptionsDataProcessor:
         # Re-round mid_price
         self.ds['mid_price'] = (self.ds['mid_price'] * 20).round() / 20
         self.ds['price'] = self.ds['mid_price']
+        
+        # Calculate or update spread (ask - bid)
+        self.ds['spread'] = self.ds['ask'] - self.ds['bid']
+        # Round spread to nearest $0.05
+        self.ds['spread'] = (self.ds['spread'] * 20).round() / 20
+        
+        # Special handling for greeks if they exist
+        if 'delta' in self.ds:
+            # Delta should be between -1 and 1
+            delta_low_mask = self.ds['delta'] < -1
+            delta_high_mask = self.ds['delta'] > 1
+            
+            if delta_low_mask.any() or delta_high_mask.any():
+                logger.info(f"Constraining delta values to [-1, 1]")
+                self.ds['delta'] = xr.where(delta_low_mask, -1, self.ds['delta'])
+                self.ds['delta'] = xr.where(delta_high_mask, 1, self.ds['delta'])
+        
+        if 'gamma' in self.ds:
+            # Gamma should be positive and reasonably bounded
+            gamma_neg_mask = self.ds['gamma'] < 0
+            gamma_high_mask = self.ds['gamma'] > 1
+            
+            if gamma_neg_mask.any():
+                logger.info(f"Flooring {gamma_neg_mask.sum().item()} negative gamma values")
+                self.ds['gamma'] = xr.where(gamma_neg_mask, 0, self.ds['gamma'])
+                
+            if gamma_high_mask.any():
+                logger.info(f"Capping {gamma_high_mask.sum().item()} high gamma values")
+                self.ds['gamma'] = xr.where(gamma_high_mask, 1, self.ds['gamma'])
+        
+        if 'theta' in self.ds:
+            # Theta should be reasonably bounded
+            theta_low_mask = self.ds['theta'] < -10
+            theta_high_mask = self.ds['theta'] > 10
+            
+            if theta_low_mask.any() or theta_high_mask.any():
+                logger.info(f"Constraining theta values to [-10, 10]")
+                self.ds['theta'] = xr.where(theta_low_mask, -10, self.ds['theta'])
+                self.ds['theta'] = xr.where(theta_high_mask, 10, self.ds['theta'])
         
         # Recalculate extrinsic value after all other adjustments
         self.ds['extrinsic_value'] = self.ds['price'] - self.ds['intrinsic_value']

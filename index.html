@@ -120,9 +120,12 @@
                 <fieldset>
                     <legend>Plot Type</legend>
                     <label><input type="radio" name="plot-type" value="Price" checked> Price</label>
-                    <label><input type="radio" name="plot-type" value="Bid"> Bid</label>
-                    <label><input type="radio" name="plot-type" value="Ask"> Ask</label>
+                    <label><input type="radio" name="plot-type" value="Delta"> Delta</label>
+                    <label><input type="radio" name="plot-type" value="Gamma"> Gamma</label>
+                    <label><input type="radio" name="plot-type" value="Theta"> Theta</label>
+                    <label><input type="radio" name="plot-type" value="IV"> IV</label>
                     <label><input type="radio" name="plot-type" value="Volume"> Volume</label>
+                    <label><input type="radio" name="plot-type" value="Spread"> Spread</label>
                     <label><input type="radio" name="plot-type" value="Intrinsic Value"> Intrinsic Value</label>
                     <label><input type="radio" name="plot-type" value="Extrinsic Value"> Extrinsic Value</label>
                 </fieldset>
@@ -145,15 +148,18 @@
         // Field mapping for plot display
         const FIELD_MAPPING = {
             "Price": "mid_price",
-            "Bid": "bid",
-            "Ask": "ask",
+            "Delta": "delta",
+            "Gamma": "gamma",
+            "Theta": "theta",
+            "IV": "impliedVolatility",
             "Volume": "volume",
+            "Spread": "spread",
             "Intrinsic Value": "intrinsic_value",
             "Extrinsic Value": "extrinsic_value"
         };
 
         // Price-related fields that need dollar formatting
-        const PRICE_FIELDS = ["Price", "Bid", "Ask", "Intrinsic Value", "Extrinsic Value"];
+        const PRICE_FIELDS = ["Price", "Spread", "Intrinsic Value", "Extrinsic Value"];
 
         // Global state
         let state = {
@@ -184,6 +190,52 @@
             plotContainer: document.getElementById('options-plot'),
             errorMessage: document.getElementById('error-message')
         };
+
+        // Helper functions for plot formatting
+        function getYAxisTitle(plotType) {
+            switch(plotType) {
+                case 'Price':
+                    return 'Option Price ($)';
+                case 'Delta':
+                    return 'Delta (Δ)';
+                case 'Gamma':
+                    return 'Gamma (Γ)';
+                case 'Theta':
+                    return 'Theta (Θ) - Daily';
+                case 'IV':
+                    return 'Implied Volatility (%)';
+                case 'Volume':
+                    return 'Trading Volume';
+                case 'Spread':
+                    return 'Bid-Ask Spread ($)';
+                case 'Intrinsic Value':
+                    return 'Intrinsic Value ($)';
+                case 'Extrinsic Value':
+                    return 'Extrinsic Value ($)';
+                default:
+                    return plotType;
+            }
+        }
+        
+        function getTickFormat(plotType) {
+            switch(plotType) {
+                case 'IV':
+                    return '.1%';  // Format as percentage with 1 decimal place
+                case 'Delta':
+                case 'Gamma':
+                case 'Theta':
+                    return '.4f';  // Format with 4 decimal places
+                case 'Volume':
+                    return ',d';   // Format as integer with commas
+                case 'Price':
+                case 'Spread':
+                case 'Intrinsic Value':
+                case 'Extrinsic Value':
+                    return '.2f';  // Format with 2 decimal places
+                default:
+                    return '';
+            }
+        }
 
         // Initialize the app
         function init() {
@@ -396,7 +448,6 @@
                     return;
                 }
                 
-                // Get the selected plot type
                 const selectedPlotType = Array.from(elements.plotOptions).find(option => option.checked).value;
                 const plotField = FIELD_MAPPING[selectedPlotType];
                 
@@ -414,10 +465,20 @@
                 calls.sort((a, b) => a.strike - b.strike);
                 puts.sort((a, b) => a.strike - b.strike);
                 
+                // Process data based on plot type
+                let callValues = calls.map(item => item[plotField]);
+                let putValues = puts.map(item => item[plotField]);
+                
+                // Special handling for IV (convert to percentage)
+                if (selectedPlotType === 'IV') {
+                    callValues = callValues.map(val => val !== null ? val * 100 : null);
+                    putValues = putValues.map(val => val !== null ? val * 100 : null);
+                }
+                
                 // Prepare data for plotting - always use 'lines' mode for all plot types
                 const callTrace = {
                     x: calls.map(item => item.strike),
-                    y: calls.map(item => item[plotField]),
+                    y: callValues,
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Calls',
@@ -429,7 +490,7 @@
                 
                 const putTrace = {
                     x: puts.map(item => item.strike),
-                    y: puts.map(item => item[plotField]),
+                    y: putValues,
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Puts',
@@ -442,7 +503,8 @@
                 // Add current price line
                 const currentPriceLine = {
                     x: [state.currentPrice, state.currentPrice],
-                    y: [0, Math.max(...calls.map(item => item[plotField] || 0), ...puts.map(item => item[plotField] || 0)) * 1.1],
+                    y: [0, Math.max(...callValues.filter(v => v !== null && !isNaN(v) && v !== undefined), 
+                                     ...putValues.filter(v => v !== null && !isNaN(v) && v !== undefined)) * 1.1 || 1],
                     type: 'scatter',
                     mode: 'lines',
                     name: `Spot: $${state.currentPrice.toFixed(2)}`, // Changed from "Current Price"
@@ -477,8 +539,9 @@
                         tickprefix: '$'
                     },
                     yaxis: {
-                        title: PRICE_FIELDS.includes(selectedPlotType) ? `${selectedPlotType} ($)` : selectedPlotType,
-                        tickprefix: PRICE_FIELDS.includes(selectedPlotType) ? '$' : ''
+                        title: getYAxisTitle(selectedPlotType),
+                        tickprefix: PRICE_FIELDS.includes(selectedPlotType) ? '$' : '',
+                        tickformat: getTickFormat(selectedPlotType)
                     },
                     hovermode: 'closest',
                     showlegend: true,
@@ -623,21 +686,38 @@
                 const callData = calls.find(item => Math.abs(item.strike - strike) < 0.01);
                 const putData = puts.find(item => Math.abs(item.strike - strike) < 0.01);
                 
+                // Format values based on plot type
+                function formatValue(value) {
+                    if (value == null || isNaN(value)) return 'N/A';
+                    
+                    switch(selectedPlotType) {
+                        case 'IV':
+                            return `${(value * 100).toFixed(1)}%`;
+                        case 'Delta':
+                        case 'Gamma':
+                        case 'Theta':
+                            return value.toFixed(4);
+                        case 'Volume':
+                            return value.toLocaleString();
+                        case 'Price':
+                        case 'Spread':
+                        case 'Intrinsic Value':
+                        case 'Extrinsic Value':
+                            return `$${value.toFixed(2)}`;
+                        default:
+                            return Number.isInteger(value) ? value.toString() : value.toFixed(2);
+                    }
+                }
+                
                 // Update trace names with values
-                if (callData && callData[plotField] != null && !isNaN(callData[plotField])) {
-                    const formattedValue = PRICE_FIELDS.includes(selectedPlotType) ? 
-                        `$${callData[plotField].toFixed(2)}` : 
-                        Number.isInteger(callData[plotField]) ? callData[plotField].toString() : callData[plotField].toFixed(2);
-                    plotData[0].name = `Calls: ${formattedValue}`;
+                if (callData) {
+                    plotData[0].name = `Calls: ${formatValue(callData[plotField])}`;
                 } else {
                     plotData[0].name = 'Calls: N/A';
                 }
                 
-                if (putData && putData[plotField] != null && !isNaN(putData[plotField])) {
-                    const formattedValue = PRICE_FIELDS.includes(selectedPlotType) ? 
-                        `$${putData[plotField].toFixed(2)}` : 
-                        Number.isInteger(putData[plotField]) ? putData[plotField].toString() : putData[plotField].toFixed(2);
-                    plotData[1].name = `Puts: ${formattedValue}`;
+                if (putData) {
+                    plotData[1].name = `Puts: ${formatValue(putData[plotField])}`;
                 } else {
                     plotData[1].name = 'Puts: N/A';
                 }
@@ -648,8 +728,17 @@
                 plotData[3].visible = true;
                 
                 // Get y-axis range
-                const yValues = [...calls.map(item => item[plotField]), ...puts.map(item => item[plotField])].filter(y => y != null && !isNaN(y));
-                const yMax = Math.max(...yValues) * 1.1;
+                let yValues = [];
+                if (selectedPlotType === 'IV') {
+                    // For IV, we need to multiply by 100 to match the display
+                    yValues = [...calls.map(item => item[plotField] * 100), ...puts.map(item => item[plotField] * 100)]
+                        .filter(y => y != null && !isNaN(y));
+                } else {
+                    yValues = [...calls.map(item => item[plotField]), ...puts.map(item => item[plotField])]
+                        .filter(y => y != null && !isNaN(y));
+                }
+                
+                const yMax = Math.max(...yValues) * 1.1 || 1;
                 plotData[3].y = [0, yMax];
                 
                 // Track if we're currently hovering

@@ -55,3 +55,74 @@
   - current_price: Current price of the underlying asset
   - expiry_dates: List of available expiration dates
   - options_data: Array of option contracts with attributes like strike, expiration, option_type, bid, ask, etc.
+
+### Plot Types Implementation
+- The application now supports the following plot types:
+  1. **Price**: Option mid-price (average of bid and ask)
+  2. **Delta**: First derivative of option price with respect to underlying price (sensitivity to price changes)
+  3. **Gamma**: Second derivative of option price with respect to underlying price (rate of change of delta)
+  4. **Theta**: Rate of change of option price with respect to time (time decay)
+  5. **Implied Volatility (IV)**: Market's expectation of future volatility derived from option prices
+  6. **Volume**: Trading volume for each option contract
+  7. **Spread**: Difference between ask and bid prices (bid-ask spread)
+  8. **Intrinsic Value**: The value an option would have if exercised immediately
+  9. **Extrinsic Value**: The premium above intrinsic value (time value and volatility premium)
+
+- Implementation details:
+  - Delta, gamma, and theta are calculated using both numerical methods and Black-Scholes formulas
+  - Implied volatility is derived from market prices using the Black-Scholes model
+  - Intrinsic value is calculated as max(0, S-K) for calls and max(0, K-S) for puts
+  - Extrinsic value is calculated as (option price - intrinsic value)
+  - Spread is calculated as (ask price - bid price)
+
+# Options Visualizer Improvements
+
+## Fields Implemented
+The following fields have been implemented and are now available for visualization:
+
+1. **Price** - Uses the mid_price field (average of bid and ask)
+2. **Delta** - First derivative of option price with respect to underlying price
+3. **Gamma** - Second derivative of option price with respect to underlying price
+4. **Theta** - Rate of change of option price with respect to time
+5. **IV (Implied Volatility)** - Displayed as percentage in the UI
+6. **Volume** - Trading volume for the option
+7. **Spread** - Difference between ask and bid prices
+8. **Intrinsic Value** - The value of the option if exercised immediately
+9. **Extrinsic Value** - The time value component of the option price
+
+## Changes Made
+
+### 1. Updated `apply_floors` method
+- Added handling for the spread field
+- Added constraints for delta, gamma, and theta
+- Improved handling of implied volatility with both floor (0.01) and cap (5.0)
+- Ensured all dollar-denominated fields are rounded to the nearest $0.05
+
+### 2. Updated `post_process_data` method
+- Fixed dimension mismatch error by using proper indexing with isel() instead of boolean masks
+- Implemented separate processing for calls and puts to avoid broadcasting issues
+- Added defensive checks for field existence before operations
+- Improved error handling with try/except blocks and detailed logging
+- Added fallback to numerical greeks if Black-Scholes calculation fails
+
+### 3. Updated `calculate_black_scholes_greeks` method
+- Fixed dimension handling by explicitly getting array shapes from dataset
+- Improved error handling with more specific exception catching
+- Added defensive check for implied volatility existence
+- Used sel() method for safer data access instead of direct array indexing
+- Simplified the code by directly storing greeks in their final variables
+
+### 4. UI Verification
+- Confirmed all plot types are properly defined in the UI
+- Verified the FIELD_MAPPING correctly maps UI labels to data fields
+
+## Bugs Fixed
+1. **Dimension Mismatch Error** - Fixed the "conflicting sizes for dimension 'DTE'" error in post_process_data by using proper indexing
+2. **Array Shape Issues** - Ensured consistent array shapes in calculate_black_scholes_greeks by explicitly creating arrays based on dimension sizes
+3. **Missing Field Handling** - Added defensive checks to prevent errors when accessing non-existent fields
+
+## Potential Future Improvements
+- Add more greeks (vega, rho) to the visualization options
+- Implement additional interpolation methods for smoother curves
+- Add ability to compare multiple expiration dates on the same plot
+- Implement volatility surface visualization

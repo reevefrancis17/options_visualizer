@@ -211,7 +211,7 @@ def get_options(ticker):
             essential_cols = [
                 'strike', 'expiration', 'option_type', 'bid', 'ask', 'mid_price', 
                 'price', 'intrinsic_value', 'extrinsic_value', 'impliedVolatility',
-                'volume', 'openInterest', 'DTE'
+                'volume', 'openInterest', 'DTE', 'delta', 'gamma', 'theta', 'spread'
             ]
             df = df[[col for col in essential_cols if col in df.columns]]
         
