@@ -1,0 +1,57 @@
+#update this file with working level memory notes, learnings, and project-specific details of openInterest
+
+## Options Visualizer Project Notes
+
+### Issues
+- High-frequency noise and oscillations in interpolated option prices, particularly for long-dated options (LEAPS)
+- Oscillatory behavior in SPY options data for the 2027-12-17 expiration date (DTE=1020) in the 450-650 strike range
+- Second derivatives of option prices showing significant oscillations, particularly in put options
+- Insufficient smoothing in the implied volatility (IV) surface interpolation
+- Fixed smoothing parameter regardless of days to expiration (DTE)
+- Long-dated options (LEAPS) require more aggressive smoothing due to their higher sensitivity to small IV changes
+- Race conditions in data fetching process causing errors during reinterpolation
+
+### Ground Truths
+- Option prices exhibit convex behavior across strikes due to the underlying asset's distribution
+- Implied volatility surfaces are typically smoother than price surfaces and better suited for interpolation
+- Using Black-Scholes with interpolated IV produces more realistic option prices than direct price interpolation
+- Proper synchronization is essential when dealing with background threads and shared resources
+- Applying appropriate smoothing to the IV surface is critical for reducing noise in the final option prices
+- Option prices for long-dated options are more sensitive to small changes in implied volatility
+- Interpolation methods need to be adapted based on the time to expiration
+- Proper dimension handling is critical when working with multi-dimensional arrays in numpy/xarray
+
+### Hypotheses
+- The adaptive smoothing approach may need further refinement for extremely long-dated options (> 2 years)
+- Different underlying assets may benefit from different smoothing parameters based on their volatility characteristics
+- The cubic interpolation of IV surfaces may still produce artifacts in certain edge cases
+- The Black-Scholes model may not fully capture the market dynamics for deep ITM or OTM options
+
+### Next Steps
+1. Monitor the visualization for any remaining artifacts
+2. Consider implementing more sophisticated volatility models if needed
+3. Add more comprehensive error handling and logging for better diagnostics
+4. Optimize performance of the interpolation methods for faster processing
+5. Consider adaptive smoothing parameters based on the characteristics of the data
+6. Explore alternative interpolation methods that may be more suitable for financial option data
+
+### Repo Conventions
+- Backend API runs on port 5002
+- Options data is cached to improve performance
+- Interpolation is used to fill gaps in options data
+- Background threads are used for data fetching and cache refreshing
+
+### Data Structures
+- `OptionsDataManager`: Central manager for options data handling
+- `OptionsDataProcessor`: Processes raw options data into an xarray Dataset
+- `OptionsCache`: Manages caching of options data
+- Options data is stored in xarray Datasets with dimensions:
+  - strike: Option strike prices
+  - expiration: Option expiration dates
+  - option_type: Call or Put
+- API returns JSON with the following structure:
+  - status: Status of the request (complete, partial, loading, not_found)
+  - ticker: The stock ticker symbol
+  - current_price: Current price of the underlying asset
+  - expiry_dates: List of available expiration dates
+  - options_data: Array of option contracts with attributes like strike, expiration, option_type, bid, ask, etc.

@@ -99,8 +99,38 @@ h1 {
 }
 
 .status {
-    font-size: 0.9em;
-    color: #7f8c8d;
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 4px;
+    margin-left: 10px;
+    font-weight: bold;
+}
+
+#status-label {
+    padding: 5px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.status-loading {
+    background-color: #f0ad4e;
+    color: #fff;
+}
+
+.status-partial {
+    background-color: #5bc0de;
+    color: #fff;
+}
+
+.status-complete {
+    background-color: #5cb85c;
+    color: #fff;
+}
+
+.status-error {
+    background-color: #d9534f;
+    color: #fff;
 }
 
 /* Navigation section */
@@ -177,12 +207,13 @@ h1 {
 
 /* Error message */
 #error-message {
-    padding: 10px;
     background-color: #f8d7da;
     color: #721c24;
+    padding: 10px 15px;
+    margin: 10px 0;
     border: 1px solid #f5c6cb;
     border-radius: 4px;
-    margin-bottom: 20px;
+    font-weight: bold;
 }
 
 /* Utility classes */

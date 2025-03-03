@@ -9,6 +9,7 @@ from datetime import datetime
 import pandas as pd
 import math
 from flask_cors import CORS
+import traceback
 
 # Fix the path modification
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # Points to project root
@@ -109,12 +110,23 @@ def get_options_data():
         
         # Try to get data from backend first
         try:
-            backend_response = requests.get(f"{BACKEND_URL}/api/options/{symbol}", timeout=2)
+            backend_response = requests.get(f"{BACKEND_URL}/api/options/{symbol}", timeout=5)
             if backend_response.status_code == 200:
+                # Verify we got JSON response
+                content_type = backend_response.headers.get('Content-Type', '')
+                if 'application/json' not in content_type:
+                    logger.error(f"Backend returned non-JSON response: {content_type}")
+                    logger.error(f"Response preview: {backend_response.text[:100]}...")
+                    raise ValueError(f"Backend returned non-JSON response: {content_type}")
+                
                 logger.info(f"Successfully retrieved data from backend for {symbol}")
                 return jsonify(backend_response.json())
         except requests.RequestException as e:
             logger.warning(f"Failed to connect to backend: {str(e)}. Falling back to local data.")
+        except ValueError as e:
+            logger.error(f"Error processing backend response: {str(e)}. Falling back to local data.")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse backend JSON response: {str(e)}. Falling back to local data.")
         
         # If backend request fails, fall back to local data processing
         # Get current processor status from cache
@@ -202,7 +214,8 @@ def get_options_data():
     
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e), 'status': 'error'}), 500
 
 # Add health check endpoint
 @app.route('/health', methods=['GET'])

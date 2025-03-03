@@ -122,6 +122,7 @@ function fetchOptionsData(ticker, isPolling = false) {
     elements.searchBtn.disabled = true;
     if (!isPolling) {
         elements.statusLabel.textContent = `Loading ${ticker} data...`;
+        elements.statusLabel.className = 'status-loading';
         hideError();
     }
     
@@ -142,13 +143,38 @@ function fetchOptionsData(ticker, isPolling = false) {
     ])
     .then(response => {
         if (!response.ok) {
+            // Check the content type to handle HTML errors gracefully
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('text/html')) {
+                // Handle HTML response (likely an error page)
+                return response.text().then(html => {
+                    console.error(`Received HTML response instead of JSON: ${html.substring(0, 100)}...`);
+                    throw new Error(`Server returned HTML instead of JSON. The server might be down or misconfigured.`);
+                });
+            }
+            
+            // Try to parse as JSON for structured error
             return response.json().then(data => {
-                throw new Error(data.error || `Failed to fetch data for ${ticker}`);
+                throw new Error(data.error || data.message || `Failed to fetch data for ${ticker}`);
             }).catch(e => {
                 // If JSON parsing fails, throw the original HTTP error
-                throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+                if (e.message.includes('JSON')) {
+                    throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+                }
+                throw e;
             });
         }
+        
+        // Check content type to ensure we're getting JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            console.error(`Unexpected content type: ${contentType}`);
+            return response.text().then(text => {
+                console.error(`Non-JSON response: ${text.substring(0, 100)}...`);
+                throw new Error(`Server returned non-JSON response. Expected JSON but got ${contentType || 'unknown content type'}.`);
+            });
+        }
+        
         return response.json();
     })
     .then(data => {
@@ -159,7 +185,9 @@ function fetchOptionsData(ticker, isPolling = false) {
         
         if (data.status === 'loading') {
             // Data is still loading, start polling
-            elements.statusLabel.textContent = `Loading ${ticker} data... (${Math.round(data.progress || 0)}%)`;
+            const progress = Math.round(data.progress * 100) || 0;
+            elements.statusLabel.textContent = `Loading ${ticker} data... (${progress}%)`;
+            elements.statusLabel.className = 'status-loading';
             if (!isPolling) {
                 startPolling(ticker);
             }
@@ -184,6 +212,7 @@ function fetchOptionsData(ticker, isPolling = false) {
         if (data.status === 'partial') {
             const percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
             elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
+            elements.statusLabel.className = 'status-partial';
             
             // Start polling for updates if not already polling
             if (!isPolling) {
@@ -191,6 +220,7 @@ function fetchOptionsData(ticker, isPolling = false) {
             }
         } else {
             elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
+            elements.statusLabel.className = 'status-complete';
         }
         
         // Reset expiry index if needed
@@ -208,6 +238,7 @@ function fetchOptionsData(ticker, isPolling = false) {
         console.error(`Error fetching data for ${ticker}:`, error);
         elements.searchBtn.disabled = false;
         elements.statusLabel.textContent = `Error loading ${ticker} data`;
+        elements.statusLabel.className = 'status-error';
         showError(error.message || 'Network error occurred');
         
         // Don't stop polling on first error if we're already polling

@@ -212,15 +212,15 @@ class OptionsCache:
         except Exception as e:
             logger.error(f"Error vacuuming database: {str(e)}")
     
-    def get(self, ticker: str) -> Tuple[Optional[Dict], Optional[float], str, float, int, int]:
+    def get(self, ticker: str) -> Tuple[Optional[Dict], Optional[float], float, float, int, int]:
         """Get cached data for a ticker.
         
         Args:
             ticker: The stock ticker symbol
             
         Returns:
-            Tuple of (options_data, current_price, status, progress, processed_dates, total_dates)
-            where status is one of 'complete', 'partial', or 'not_found'
+            Tuple of (options_data, current_price, timestamp, progress, processed_dates, total_dates)
+            where timestamp is a float representing the Unix timestamp when the data was cached
         """
         try:
             with self.lock:
@@ -240,10 +240,17 @@ class OptionsCache:
                 
                 # If no result, return not found
                 if not result:
-                    return None, None, 'not_found', 0, 0, 0
+                    return None, None, time.time(), 0, 0, 0
                 
                 # Unpack the result
                 data_blob, current_price, timestamp, processed_dates, total_dates, is_compressed = result
+                
+                # Ensure timestamp is a float
+                try:
+                    timestamp = float(timestamp)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid timestamp for {ticker}, using current time")
+                    timestamp = time.time()
                 
                 # Add ticker to cached tickers set if not already there
                 if ticker not in self.cached_tickers:
@@ -262,30 +269,41 @@ class OptionsCache:
                         options_data = pickle.loads(data_blob)
                 except Exception as deserialize_error:
                     logger.error(f"Error deserializing data for {ticker}: {str(deserialize_error)}")
-                    return None, None, 'not_found', 0, 0, 0
+                    return None, None, time.time(), 0, 0, 0
                 
                 # Calculate progress
-                progress = (processed_dates / total_dates) * 100 if total_dates > 0 else 0
+                progress = processed_dates / max(total_dates, 1) if total_dates > 0 else 0
                 
-                # Determine status based on processed vs total dates and staleness
+                # Trigger a background refresh if stale
                 if is_stale:
-                    # Data is stale but we'll return it anyway and trigger a refresh in the background
-                    status = 'stale'
-                    # Trigger a background refresh
                     self._trigger_refresh(ticker)
-                else:
-                    status = 'complete' if processed_dates >= total_dates else 'partial'
                 
-                return options_data, current_price, status, progress, processed_dates, total_dates
+                return options_data, current_price, timestamp, progress, processed_dates, total_dates
         
         except Exception as e:
             logger.error(f"Error retrieving data from cache for {ticker}: {str(e)}")
-            return None, None, 'not_found', 0, 0, 0
+            return None, None, time.time(), 0, 0, 0
     
     def _trigger_refresh(self, ticker: str):
         """Trigger a background refresh of a stale ticker."""
-        # This will be called by the OptionsDataManager
         logger.info(f"Triggering background refresh for stale ticker: {ticker}")
+        
+        # Call the refresh callback if registered
+        if hasattr(self, 'refresh_callback') and self.refresh_callback:
+            try:
+                self.refresh_callback(ticker)
+                logger.info(f"Called refresh callback for ticker: {ticker}")
+            except Exception as e:
+                logger.error(f"Error calling refresh callback for {ticker}: {str(e)}")
+    
+    def register_refresh_callback(self, callback):
+        """Register a callback function to be called when a ticker needs refreshing.
+        
+        Args:
+            callback: A function that takes a ticker symbol as its only argument
+        """
+        self.refresh_callback = callback
+        logger.info("Registered refresh callback")
     
     def set(self, ticker: str, options_data: Dict, current_price: float, processed_dates: int, total_dates: int):
         """Store data in the cache.

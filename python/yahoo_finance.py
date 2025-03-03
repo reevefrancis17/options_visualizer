@@ -1,3 +1,4 @@
+#yahoo_finance.py
 import yfinance as yf
 import logging
 import time
@@ -47,7 +48,7 @@ class YahooFinanceAPI:
         except Exception as e:
             logger.error(f"Error getting risk-free rate: {str(e)}")
             # Default to a reasonable value if we can't get the actual rate
-            return 0.035  # 3.5% as fallback
+            return 0.04  # 4% as fallback
 
     def _get_current_price(self, stock, ticker):
         """Helper method to get current price with fallbacks."""
