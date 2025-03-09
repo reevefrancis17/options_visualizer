@@ -17,8 +17,9 @@ from flask_cors import CORS
 import traceback
 import atexit
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+# Import local modules
+from options_visualizer_backend.options_data import OptionsDataManager
+from options_visualizer_backend.config import PORT, DEBUG, HOST, CACHE_DURATION, MAX_WORKERS, REQUEST_TIMEOUT
 
 # Setup logging
 os.makedirs('logs', exist_ok=True)
@@ -45,7 +46,7 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})  # Enable CORS for all API ro
 CACHE_DIR = 'cache'
 DATA_DIR = 'data'
 CSV_PATH = os.path.join(DATA_DIR, 'tickers.csv')
-CACHE_DURATION = 10 * 60  # 10 minutes in seconds
+CACHE_DURATION = CACHE_DURATION  # 10 minutes in seconds
 BATCH_SIZE = 5  # Number of tickers to refresh in a batch
 
 # Ensure directories exist
@@ -57,15 +58,11 @@ os.makedirs('logs', exist_ok=True)
 data_manager = None
 
 # Initialize thread pool for concurrent request handling
-# Use a reasonable number of workers based on CPU cores
-thread_pool = concurrent.futures.ThreadPoolExecutor(
-    max_workers=min(32, (os.cpu_count() or 4) * 2),
-    thread_name_prefix="ApiWorker"
-)
-logger.info(f"Initialized thread pool with {min(32, (os.cpu_count() or 4) * 2)} workers")
+thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS)
+logger.info(f"Initialized thread pool with {MAX_WORKERS} workers")
 
-# Dictionary to store futures for each request
-request_futures = {}
+# Dictionary to store futures for potential cancellation
+futures = {}
 
 # Load ticker list from CSV
 def load_tickers():
@@ -99,7 +96,6 @@ def get_data_manager():
             logger.info("Using shared options data manager from main.py")
         except ImportError:
             # Fall back to creating a new instance
-            from python.options_data import OptionsDataManager
             data_manager = OptionsDataManager(cache_duration=CACHE_DURATION)
             logger.info("Created new options data manager (not running from main.py)")
     return data_manager
@@ -333,15 +329,15 @@ def get_options(ticker):
         )
         
         # Store the future for potential cancellation
-        request_futures[request_id] = future
+        futures[request_id] = future
         
         # Wait for the result with a timeout
         try:
-            response, status_code = future.result(timeout=30)  # 30 second timeout
+            response, status_code = future.result(timeout=REQUEST_TIMEOUT)  # 30 second timeout
             
             # Remove the future from the dictionary
-            if request_id in request_futures:
-                del request_futures[request_id]
+            if request_id in futures:
+                del futures[request_id]
             
             return jsonify(response), status_code
         except concurrent.futures.TimeoutError:
@@ -551,5 +547,9 @@ atexit.register(cleanup)
 
 # Only run the app if this file is executed directly
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5002))
-    app.run(debug=True, host='0.0.0.0', port=port) 
+    # Create data directory if it doesn't exist
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # Start the server
+    logger.info(f"Starting backend API server on port {PORT}")
+    app.run(debug=DEBUG, host=HOST, port=PORT) 

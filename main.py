@@ -16,13 +16,13 @@ import webbrowser
 import atexit
 from options_visualizer_web.app import app as frontend_app
 from options_visualizer_backend.app import app as backend_app
-from python.options_data import OptionsDataManager
+from options_visualizer_backend.options_data import OptionsDataManager
+from options_visualizer_backend.config import MAX_WORKERS, CACHE_DURATION
+from options_visualizer_web.config import PORT as FRONTEND_PORT
+from options_visualizer_backend.config import PORT as BACKEND_PORT
 
-# Initialize the options data manager with a 10-minute cache duration
-# This will be used by both the frontend and backend
-# Calculate a reasonable number of workers based on CPU cores
-max_workers = min(32, (os.cpu_count() or 4) * 2)
-options_data_manager = OptionsDataManager(cache_duration=600, max_workers=max_workers)
+# Initialize the options data manager
+options_data_manager = OptionsDataManager(cache_duration=CACHE_DURATION, max_workers=MAX_WORKERS)
 logger = logging.getLogger(__name__)
 
 # Track server status
@@ -74,90 +74,103 @@ def find_available_port(start_port, max_attempts=10):
     return None
 
 def run_backend():
-    """Run the backend Flask app in a separate thread"""
+    """Run the backend API server."""
     try:
-        backend_port = int(os.environ.get('BACKEND_PORT', 5002))
+        logger.info("Starting backend API server...")
+        # Set the data manager as a global variable for the backend
+        backend_app.config['OPTIONS_DATA_MANAGER'] = options_data_manager
         
-        # Check if port is available, find another if not
-        available_port = find_available_port(backend_port)
-        if available_port != backend_port:
-            logger.warning(f"Port {backend_port} is in use, using port {available_port} for backend instead")
-            backend_port = available_port
-            os.environ['BACKEND_PORT'] = str(backend_port)
-            
-            # Update the frontend config if needed
-            if 'BACKEND_URL' not in os.environ:
-                os.environ['BACKEND_URL'] = f"http://localhost:{backend_port}"
+        # Find an available port starting from the configured port
+        port = find_available_port(BACKEND_PORT)
+        if port != BACKEND_PORT:
+            logger.warning(f"Port {BACKEND_PORT} is in use, using port {port} instead")
         
-        logger.info(f"Starting backend server on port {backend_port}")
+        # Start the backend server
+        backend_thread = threading.Thread(
+            target=backend_app.run,
+            kwargs={'host': '0.0.0.0', 'port': port, 'debug': False, 'use_reloader': False},
+            daemon=True
+        )
+        backend_thread.start()
+        logger.info(f"Backend API server started on port {port}")
         servers_ready['backend'] = True
-        backend_app.run(debug=False, host='0.0.0.0', port=backend_port, use_reloader=False)
+        return port
     except Exception as e:
-        logger.error(f"Error starting backend server: {str(e)}")
-        servers_ready['backend'] = False
+        logger.error(f"Failed to start backend API server: {e}")
+        return None
 
 def run_frontend():
-    """Run the frontend Flask app in a separate thread"""
+    """Run the frontend web server."""
     try:
-        frontend_port = int(os.environ.get('PORT', 5001))
+        logger.info("Starting frontend web server...")
+        # Set the data manager as a global variable for the frontend
+        frontend_app.config['OPTIONS_DATA_MANAGER'] = options_data_manager
         
-        # Check if port is available, find another if not
-        available_port = find_available_port(frontend_port)
-        if available_port != frontend_port:
-            logger.warning(f"Port {frontend_port} is in use, using port {available_port} for frontend instead")
-            frontend_port = available_port
-            os.environ['PORT'] = str(frontend_port)
+        # Find an available port starting from the configured port
+        port = find_available_port(FRONTEND_PORT)
+        if port != FRONTEND_PORT:
+            logger.warning(f"Port {FRONTEND_PORT} is in use, using port {port} instead")
         
-        logger.info(f"Starting frontend server on port {frontend_port}")
+        # Start the frontend server
+        frontend_thread = threading.Thread(
+            target=frontend_app.run,
+            kwargs={'host': '0.0.0.0', 'port': port, 'debug': False, 'use_reloader': False},
+            daemon=True
+        )
+        frontend_thread.start()
+        logger.info(f"Frontend web server started on port {port}")
         servers_ready['frontend'] = True
-        frontend_app.run(debug=False, host='0.0.0.0', port=frontend_port, use_reloader=False)
+        return port
     except Exception as e:
-        logger.error(f"Error starting frontend server: {str(e)}")
-        servers_ready['frontend'] = False
+        logger.error(f"Failed to start frontend web server: {e}")
+        return None
 
 def open_browser():
-    """Open the browser when both servers are ready"""
-    # Wait for both servers to be ready
-    max_wait = 30  # Maximum wait time in seconds
-    start_time = time.time()
-    
-    while not (servers_ready['backend'] and servers_ready['frontend']):
-        if time.time() - start_time > max_wait:
-            logger.warning("Timeout waiting for servers to start")
-            return
-        time.sleep(0.5)
-    
-    # Both servers are ready, open browser
-    frontend_port = os.environ.get('PORT', '5001')
-    url = f"http://localhost:{frontend_port}"
-    logger.info(f"Opening browser at {url}")
-    
-    # Wait a bit more to ensure the server is fully initialized
+    """Open the web browser to the frontend URL."""
+    # Wait a moment for the servers to start
     time.sleep(2)
-    webbrowser.open(url)
-
-if __name__ == '__main__':
-    logger.info("Starting Options Visualizer from main.py")
     
-    # Register signal handler
+    # Open the browser
+    url = f"http://localhost:{FRONTEND_PORT}"
+    logger.info(f"Opening browser at {url}")
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        logger.error(f"Failed to open browser: {e}")
+
+def main():
+    """Main entry point for the application."""
+    # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Register cleanup function
     atexit.register(cleanup)
     
-    # Start backend in a separate thread
-    backend_thread = threading.Thread(target=run_backend, daemon=True)
+    logger.info("Starting Options Visualizer...")
+    
+    # Start the backend server in a separate thread
+    backend_thread = threading.Thread(target=run_backend)
+    backend_thread.daemon = True
     backend_thread.start()
-    logger.info("Backend server started in background thread")
     
-    # Start frontend in a separate thread
-    frontend_thread = threading.Thread(target=run_frontend, daemon=True)
+    # Start the frontend server in a separate thread
+    frontend_thread = threading.Thread(target=run_frontend)
+    frontend_thread.daemon = True
     frontend_thread.start()
-    logger.info("Frontend server started in background thread")
     
-    # Open browser in a separate thread
-    browser_thread = threading.Thread(target=open_browser, daemon=True)
+    # Wait for servers to start
+    timeout = 10  # seconds
+    start_time = time.time()
+    while not (servers_ready['backend'] and servers_ready['frontend']):
+        if time.time() - start_time > timeout:
+            logger.error("Timeout waiting for servers to start")
+            return 1
+        time.sleep(0.1)
+    
+    # Open browser after a short delay
+    browser_thread = threading.Thread(target=lambda: open_browser())
+    browser_thread.daemon = True
     browser_thread.start()
     
     # Keep the main thread alive
@@ -166,5 +179,8 @@ if __name__ == '__main__':
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received, shutting down...")
-        cleanup()
-        sys.exit(0) 
+    
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main()) 

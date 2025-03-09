@@ -11,19 +11,17 @@ import math
 from flask_cors import CORS
 import traceback
 
-# Fix the path modification
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # Points to project root
-
 # Import the existing modules
-from python.options_data import OptionsDataManager, OptionsDataProcessor
+from options_visualizer_backend.options_data import OptionsDataManager, OptionsDataProcessor
+from options_visualizer_web.config import PORT, DEBUG, HOST, BACKEND_URL, LOG_DIR
 
 # Configure logging
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug', 'logs')
 if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+    os.makedirs(log_dir, exist_ok=True)
 
 # Clear logs on startup
-log_file = os.path.join(log_dir, 'web_app.log')
+log_file = os.path.join(LOG_DIR, 'web_app.log')
 if os.path.exists(log_file):
     with open(log_file, 'w') as f:
         f.write(f"=== New session started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
@@ -73,7 +71,7 @@ logger.info(f"Template folder: {template_folder}")
 data_manager = None
 
 # Backend API URL
-BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:5002')
+BACKEND_API_URL = BACKEND_URL
 
 @app.route('/')
 def index():
@@ -110,7 +108,7 @@ def get_options_data():
         
         # Try to get data from backend first
         try:
-            backend_response = requests.get(f"{BACKEND_URL}/api/options/{symbol}", timeout=5)
+            backend_response = requests.get(f"{BACKEND_API_URL}/api/options/{symbol}", timeout=5)
             if backend_response.status_code == 200:
                 # Verify we got JSON response
                 content_type = backend_response.headers.get('Content-Type', '')
@@ -315,6 +313,6 @@ def health_check():
 
 # Only run the app if this file is executed directly
 if __name__ == '__main__':
-    # This block will only run when app.py is executed directly, not when imported
-    port = int(os.environ.get('PORT', 5001))
-    app.run(debug=True, host='0.0.0.0', port=port) 
+    # Start the server
+    logger.info(f"Starting frontend web server on port {PORT}")
+    app.run(debug=DEBUG, host=HOST, port=PORT) 
