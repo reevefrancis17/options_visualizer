@@ -6,6 +6,7 @@ import pickle
 import logging
 import json
 import math
+import concurrent.futures
 from datetime import datetime
 from flask import Flask, jsonify, request, Response
 import pandas as pd
@@ -14,6 +15,7 @@ import yfinance as yf
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS
 import traceback
+import atexit
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -53,6 +55,17 @@ os.makedirs('logs', exist_ok=True)
 
 # Initialize the options data manager - will be replaced with shared instance
 data_manager = None
+
+# Initialize thread pool for concurrent request handling
+# Use a reasonable number of workers based on CPU cores
+thread_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=min(32, (os.cpu_count() or 4) * 2),
+    thread_name_prefix="ApiWorker"
+)
+logger.info(f"Initialized thread pool with {min(32, (os.cpu_count() or 4) * 2)} workers")
+
+# Dictionary to store futures for each request
+request_futures = {}
 
 # Load ticker list from CSV
 def load_tickers():
@@ -137,18 +150,12 @@ def refresh_all_tickers():
     except Exception as e:
         logger.error(f"Error in refresh_all_tickers: {str(e)}")
 
-# API endpoint to get options data for a ticker
-@app.route('/api/options/<ticker>', methods=['GET'])
-def get_options(ticker):
-    """Get options data for a ticker."""
+# Function to process options data request in a separate thread
+def process_options_request(ticker, dte_min=None, dte_max=None, fields=None):
+    """Process an options data request in a separate thread."""
     try:
         ticker = ticker.upper()
-        logger.info(f"API request for options data: {ticker}")
-        
-        # Check for query parameters
-        dte_min = request.args.get('dte_min', None)
-        dte_max = request.args.get('dte_max', None)
-        fields = request.args.get('fields', None)
+        logger.info(f"Processing options data request for {ticker} in thread")
         
         # Get specific fields if requested
         field_list = fields.split(',') if fields else None
@@ -163,14 +170,35 @@ def get_options(ticker):
         # The get_current_processor method now handles triggering background refreshes for stale data
         processor, current_price, status, progress = manager.get_current_processor(ticker)
         
+        # Handle different status cases
+        if status == 'error':
+            # Check if we have any error information in the cache
+            cached_data = manager._cache.get(ticker)
+            error_message = "Unknown error occurred"
+            
+            if cached_data and cached_data[0] and isinstance(cached_data[0], dict) and '_error' in cached_data[0]:
+                error_message = cached_data[0].get('_error', error_message)
+            
+            return {
+                'status': 'error',
+                'message': f'Error fetching data for {ticker}: {error_message}',
+                'ticker': ticker,
+                'error': error_message
+            }, 500
+        
         # If no processor is available yet, it means we're still loading the data
         if processor is None:
-            return jsonify({
+            # Ensure progress is a valid number between 0 and 1
+            valid_progress = 0.0
+            if isinstance(progress, (int, float)) and not math.isnan(progress) and not math.isinf(progress):
+                valid_progress = max(0.0, min(1.0, progress))
+                
+            return {
                 'status': 'loading',
                 'message': f'Fetching data for {ticker}',
                 'ticker': ticker,
-                'progress': progress
-            }), 202  # Accepted
+                'progress': valid_progress
+            }, 202  # Accepted
         
         # Get the data frame
         df = processor.get_data_frame() if processor else None
@@ -179,150 +207,157 @@ def get_options(ticker):
         # it means the data is still being processed
         if df is None or df.empty:
             # Data is being processed, return loading status
-            return jsonify({
+            return {
                 'status': 'loading',
                 'message': f'Processing data for {ticker}',
                 'ticker': ticker,
                 'progress': progress
-            }), 202  # Accepted
+            }, 202  # Accepted
         
         # Apply DTE filters if provided
         if dte_min is not None:
             try:
                 dte_min = float(dte_min)
                 df = df[df['DTE'] >= dte_min]
-                logger.info(f"Filtered options with DTE >= {dte_min}")
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid dte_min parameter: {dte_min}")
-                
+            except (ValueError, TypeError) as e:
+                return {
+                    'status': 'error',
+                    'message': f'Invalid dte_min parameter: {str(e)}',
+                    'ticker': ticker
+                }, 400  # Bad Request
+        
         if dte_max is not None:
             try:
                 dte_max = float(dte_max)
                 df = df[df['DTE'] <= dte_max]
-                logger.info(f"Filtered options with DTE <= {dte_max}")
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid dte_max parameter: {dte_max}")
+            except (ValueError, TypeError) as e:
+                return {
+                    'status': 'error',
+                    'message': f'Invalid dte_max parameter: {str(e)}',
+                    'ticker': ticker
+                }, 400  # Bad Request
         
-        # Get expiration dates
-        expiry_dates = processor.get_expirations()
-        expiry_dates_str = [date.strftime('%Y-%m-%d') for date in expiry_dates]
+        # Get unique expiration dates
+        expiry_dates = sorted(df['expiration'].unique().tolist())
         
-        # Convert datetime columns to strings
-        df['expiration'] = df['expiration'].dt.strftime('%Y-%m-%d')
+        # Process the DataFrame to handle NaN values
+        # Convert datetime columns to string
+        for col in df.select_dtypes(include=['datetime64']).columns:
+            df[col] = df[col].dt.strftime('%Y-%m-%d')
         
-        # Replace NaN values with None using multiple approaches to ensure all NaNs are caught
-        df = df.replace({np.nan: None})
-        df = df.where(pd.notnull(df), None)
-        
-        # Additional check for object columns that might contain 'NaN' strings
+        # Replace NaN values with None for JSON serialization
+        # For object columns
         for col in df.select_dtypes(include=['object']).columns:
-            df[col] = df[col].replace('NaN', None)
+            df[col] = df[col].where(pd.notna(df[col]), None)
         
-        # Additional check for numeric columns to ensure NaN values are properly handled
+        # For numeric columns
         for col in df.select_dtypes(include=['float', 'int']).columns:
-            df[col] = df[col].apply(lambda x: None if pd.isna(x) or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))) else x)
+            df[col] = df[col].where(pd.notna(df[col]), None)
         
-        # For very large datasets, optimize the response
-        if len(df) > 10000:
-            # For very large datasets, only include essential columns
-            essential_cols = [
-                'strike', 'expiration', 'option_type', 'DTE', 
-                'mid_price', 'delta', 'gamma', 'theta', 'impliedVolatility',
-                'volume', 'spread', 'intrinsic_value', 'extrinsic_value'
-            ]
-            df = df[[col for col in essential_cols if col in df.columns]]
-            
-            # Round numeric columns to reduce payload size
-            for col in df.select_dtypes(include=['float']).columns:
-                if col in ['delta', 'gamma', 'theta']:
-                    df[col] = df[col].round(4)  # 4 decimal places for greeks
-                elif col == 'impliedVolatility':
-                    df[col] = df[col].round(3)  # 3 decimal places for IV
-                else:
-                    df[col] = df[col].round(2)  # 2 decimal places for prices
+        # Convert to records
+        options_data = df.to_dict('records')
         
-        # Convert to records with chunking for large datasets
-        if len(df) > 50000:
-            # For extremely large datasets, chunk the response
-            chunk_size = 10000
-            data_records = []
-            
-            for i in range(0, len(df), chunk_size):
-                chunk = df.iloc[i:i+chunk_size]
-                data_records.extend(chunk.to_dict(orient='records'))
-                
-                # Force garbage collection after each chunk
-                import gc
-                gc.collect()
-        else:
-            # For smaller datasets, convert all at once
-            data_records = df.to_dict(orient='records')
+        # Replace NaN values with None for JSON serialization
+        for record in options_data:
+            for key, value in list(record.items()):
+                # Check for NaN or infinity in float values
+                if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+                    record[key] = None
         
-        # Filter fields if requested
-        if field_list:
+        # For large datasets, only include requested fields to reduce payload size
+        if field_list and len(options_data) > 100:
+            logger.info(f"Filtering large dataset to include only requested fields: {field_list}")
             # Always include these essential fields
             essential_fields = ['strike', 'expiration', 'option_type', 'DTE']
-            required_fields = list(set(essential_fields + field_list))
+            fields_to_include = list(set(field_list + essential_fields))
             
             # Filter the records to only include requested fields
-            filtered_records = []
-            for record in data_records:
-                filtered_record = {k: record.get(k) for k in required_fields if k in record}
-                filtered_records.append(filtered_record)
-            data_records = filtered_records
-            logger.info(f"Filtered response to include only fields: {required_fields}")
+            options_data = [{k: v for k, v in record.items() if k in fields_to_include} for record in options_data]
         
-        # Prepare response
+        # Round numeric values to reduce payload size
+        if len(options_data) > 100:
+            logger.info("Rounding numeric values to reduce payload size")
+            for record in options_data:
+                for key, value in record.items():
+                    if isinstance(value, float):
+                        # Round to 4 decimal places for most values
+                        if key in ['delta', 'gamma', 'theta', 'impliedVolatility']:
+                            record[key] = round(value, 4)
+                        else:
+                            # Round to 2 decimal places for price values
+                            record[key] = round(value, 2)
+        
+        # Prepare the response
         response = {
             'status': status,
             'ticker': ticker,
             'current_price': current_price,
-            'expiry_dates': expiry_dates_str,
-            'options_data': data_records,
-            'processed_dates': len(expiry_dates),
-            'total_dates': len(expiry_dates),
-            'progress': progress,
-            'using_cached_data': status != 'loading'
+            'expiry_dates': expiry_dates,
+            'options_data': options_data
         }
         
-        # If status is 'partial', it means we're using cached data but also refreshing in background
-        if status == 'partial':
-            response['message'] = 'Using cached data while refreshing in background'
-        
-        # Use a streaming response for large datasets to avoid memory issues
-        if len(data_records) > 50000:
-            def generate():
-                # Yield the response in chunks
-                yield '{'
-                
-                # Add all fields except options_data
-                fields = {k: v for k, v in response.items() if k != 'options_data'}
-                yield json.dumps(fields)[1:-1] + ','  # Remove { and } and add comma
-                
-                # Start options_data array
-                yield '"options_data": ['
-                
-                # Yield each record
-                for i, record in enumerate(data_records):
-                    if i > 0:
-                        yield ','
-                    yield json.dumps(record)
-                
-                # Close options_data array and response
-                yield ']}'
-            
-            return Response(generate(), mimetype='application/json')
-        else:
-            # For smaller datasets, use standard jsonify
-            return jsonify(response)
-    
+        return response, 200
     except Exception as e:
-        logger.error(f"Error processing request for {ticker}: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
+        logger.error(f"Error processing options data for {ticker} in thread: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
             'status': 'error',
-            'message': str(e)
-        }), 500
+            'message': f'Error processing data for {ticker}: {str(e)}',
+            'ticker': ticker,
+            'error': str(e)
+        }, 500
+
+# API endpoint to get options data for a ticker
+@app.route('/api/options/<ticker>', methods=['GET'])
+def get_options(ticker):
+    """Get options data for a ticker."""
+    try:
+        ticker = ticker.upper()
+        logger.info(f"API request for options data: {ticker}")
+        
+        # Check for query parameters
+        dte_min = request.args.get('dte_min', None)
+        dte_max = request.args.get('dte_max', None)
+        fields = request.args.get('fields', None)
+        
+        # Generate a unique request ID
+        request_id = f"{ticker}_{time.time()}"
+        
+        # Submit the request to the thread pool
+        future = thread_pool.submit(
+            process_options_request,
+            ticker,
+            dte_min,
+            dte_max,
+            fields
+        )
+        
+        # Store the future for potential cancellation
+        request_futures[request_id] = future
+        
+        # Wait for the result with a timeout
+        try:
+            response, status_code = future.result(timeout=30)  # 30 second timeout
+            
+            # Remove the future from the dictionary
+            if request_id in request_futures:
+                del request_futures[request_id]
+            
+            return jsonify(response), status_code
+        except concurrent.futures.TimeoutError:
+            # If the request times out, return a timeout response
+            # but keep the future running in the background
+            logger.warning(f"Request timeout for {ticker}, continuing in background")
+            return jsonify({
+                'status': 'loading',
+                'message': f'Request timeout for {ticker}, continuing in background',
+                'ticker': ticker,
+                'progress': 0.0
+            }), 202  # Accepted
+    except Exception as e:
+        logger.error(f"Error handling options request for {ticker}: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e), 'status': 'error'}), 500
 
 # API endpoint to get available tickers
 @app.route('/api/tickers', methods=['GET'])
@@ -496,6 +531,23 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(refresh_all_tickers, 'interval', minutes=30, id='refresh_all_tickers')
 scheduler.start()
 logger.info("Started background scheduler for cache refresh")
+
+# Add a cleanup function to properly shutdown the thread pool when the application exits
+def cleanup():
+    """Cleanup function to shutdown thread pools and other resources."""
+    logger.info("Shutting down thread pool...")
+    thread_pool.shutdown(wait=False)
+    
+    # Shutdown the data manager if it exists
+    if data_manager is not None:
+        logger.info("Shutting down data manager...")
+        if hasattr(data_manager, 'shutdown'):
+            data_manager.shutdown()
+    
+    logger.info("Cleanup complete")
+
+# Register the cleanup function to be called when the application exits
+atexit.register(cleanup)
 
 # Only run the app if this file is executed directly
 if __name__ == '__main__':

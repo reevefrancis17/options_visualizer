@@ -465,3 +465,56 @@ The original implementation calculated Greeks (delta, gamma, theta) using simple
 - All calculations have proper error handling and fallback mechanisms
 
 These improvements significantly enhance the accuracy and reliability of the Greeks and IV calculations, providing users with more accurate and useful information for options analysis.
+
+# Multithreading Implementation for Improved Scalability
+
+## Problem Identified
+The application was processing requests sequentially, which limited throughput and responsiveness under load. Each request for options data would block other requests, and resource-intensive operations like data fetching and processing would tie up the main thread.
+
+## Solution Implemented
+
+### 1. Thread Pool for Concurrent Processing
+- Added `ThreadPoolExecutor` to the `OptionsDataManager` class for parallel data processing
+- Implemented a task queue system to manage and prioritize incoming requests
+- Configured the thread pool with a reasonable number of workers based on CPU cores
+- Added proper thread lifecycle management with cleanup handlers
+
+### 2. Task Queue for Request Management
+- Created a task queue in the `OptionsDataManager` to manage fetch requests
+- Implemented a dedicated task processor thread to handle the queue
+- Updated the `start_fetching` method to use the task queue instead of directly creating threads
+- Added support for completion callbacks to handle asynchronous results
+
+### 3. Concurrent API Request Handling
+- Updated the backend API endpoint to process requests in separate threads
+- Implemented request timeouts with background processing continuation
+- Added a request tracking system to manage in-flight requests
+- Improved error handling with thread-specific context information
+
+### 4. Thread Safety Enhancements
+- Leveraged existing per-ticker locks in the `OptionsCache` to prevent race conditions
+- Added proper synchronization around shared resources
+- Implemented thread-safe progress tracking and status updates
+- Added detailed logging with thread identification for debugging
+
+### 5. Graceful Shutdown Handling
+- Added cleanup functions to properly shutdown thread pools
+- Registered shutdown handlers with `atexit` to ensure resources are released
+- Implemented signal handlers for proper termination on SIGINT and SIGTERM
+- Added wait mechanisms to allow in-flight requests to complete during shutdown
+
+## Benefits
+1. **Improved Throughput**: Multiple requests can be processed concurrently
+2. **Better Responsiveness**: Long-running operations don't block the main thread
+3. **Efficient Resource Usage**: Thread pool prevents resource exhaustion
+4. **Scalability**: System can handle more concurrent users and requests
+5. **Reliability**: Proper error handling and resource management
+
+## Technical Details
+- Thread pool size is configured based on CPU cores: `min(32, (os.cpu_count() or 4) * 2)`
+- Task queue uses a producer-consumer pattern for efficient request handling
+- API requests have a 30-second timeout but continue processing in the background
+- Thread-safe caching with per-ticker locks prevents race conditions
+- Proper cleanup ensures resources are released when the application exits
+
+This multithreading implementation significantly improves the application's ability to handle concurrent requests, making it more responsive and scalable for multiple users.

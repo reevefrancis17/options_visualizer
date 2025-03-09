@@ -158,19 +158,35 @@ class YahooFinanceAPI:
         
         for attempt in range(self.max_retries):
             try:
-                # Create ticker object - don't pass session parameter
-                stock = yf.Ticker(ticker)
+                # Create ticker object with a fresh session
+                try:
+                    stock = yf.Ticker(ticker)
+                    logger.info(f"Successfully created Ticker object for {ticker}")
+                except Exception as ticker_error:
+                    logger.error(f"Error creating Ticker object for {ticker}: {str(ticker_error)}")
+                    raise ValueError(f"Failed to create Ticker object for {ticker}")
                 
-                # Get current price
-                current_price = self._get_current_price(stock, ticker)
+                # Get current price with better error handling
+                try:
+                    current_price = self._get_current_price(stock, ticker)
+                    if current_price is None or current_price <= 0:
+                        logger.error(f"Invalid current price for {ticker}: {current_price}")
+                        raise ValueError(f"Invalid current price for {ticker}")
+                    logger.info(f"Got current price for {ticker}: {current_price}")
+                except Exception as price_error:
+                    logger.error(f"Error getting current price for {ticker}: {str(price_error)}")
+                    raise ValueError(f"Failed to get current price for {ticker}")
                 
-                # Get expiration dates
-                expiry_dates = stock.options
-                if not expiry_dates:
-                    logger.error(f"No expiration dates found for {ticker}")
-                    raise ValueError(f"No options data available for {ticker}")
-                
-                logger.info(f"Found {len(expiry_dates)} expiration dates for {ticker}")
+                # Get expiration dates with better error handling
+                try:
+                    expiry_dates = stock.options
+                    if not expiry_dates:
+                        logger.error(f"No expiration dates found for {ticker}")
+                        raise ValueError(f"No options data available for {ticker}")
+                    logger.info(f"Found {len(expiry_dates)} expiration dates for {ticker}")
+                except Exception as expiry_error:
+                    logger.error(f"Error getting expiration dates for {ticker}: {str(expiry_error)}")
+                    raise ValueError(f"Failed to get expiration dates for {ticker}")
                 
                 # Limit the number of dates if max_dates is specified
                 if max_dates and len(expiry_dates) > max_dates:
@@ -215,19 +231,25 @@ class YahooFinanceAPI:
                         except Exception as e:
                             logger.error(f"Error processing future for {expiry}: {str(e)}")
                 
-                # Return the data we have
+                # Verify we have some data before returning
+                if not options_data:
+                    logger.error(f"No options data collected for {ticker}")
+                    raise ValueError(f"Failed to collect any options data for {ticker}")
+                
+                logger.info(f"Successfully fetched data for {ticker} with {len(options_data)} expiration dates")
                 return options_data, current_price
                 
             except Exception as e:
                 logger.error(f"Error in attempt {attempt + 1} for {ticker}: {str(e)}")
                 if attempt < self.max_retries - 1:
                     logger.info(f"Retrying {ticker} (attempt {attempt + 1}/{self.max_retries})")
-                    time.sleep(self.retry_delay)
+                    time.sleep(self.retry_delay * (attempt + 1))  # Exponential backoff
                 else:
                     logger.error(f"All {self.max_retries} attempts failed for {ticker}")
-                    raise
+                    # Don't raise here, return None, None to allow caller to handle
         
         # If we get here, all attempts failed
+        logger.error(f"Failed to fetch options data for {ticker} after {self.max_retries} attempts")
         return None, None
         
     def get_batch_options_data(self, tickers: List[str], max_dates=None):

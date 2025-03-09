@@ -13,13 +13,17 @@ import time
 import signal
 import subprocess
 import webbrowser
+import atexit
 from options_visualizer_web.app import app as frontend_app
 from options_visualizer_backend.app import app as backend_app
 from python.options_data import OptionsDataManager
 
 # Initialize the options data manager with a 10-minute cache duration
 # This will be used by both the frontend and backend
-options_data_manager = OptionsDataManager(cache_duration=600)
+# Calculate a reasonable number of workers based on CPU cores
+max_workers = min(32, (os.cpu_count() or 4) * 2)
+options_data_manager = OptionsDataManager(cache_duration=600, max_workers=max_workers)
+logger = logging.getLogger(__name__)
 
 # Track server status
 servers_ready = {
@@ -38,7 +42,20 @@ def signal_handler(sig, frame):
     """Handle Ctrl+C and other termination signals"""
     logger.info("Shutting down Options Visualizer...")
     # Clean up and exit
+    cleanup()
     sys.exit(0)
+
+def cleanup():
+    """Cleanup function to shutdown thread pools and other resources."""
+    logger.info("Running cleanup...")
+    
+    # Shutdown the options data manager
+    if options_data_manager is not None:
+        logger.info("Shutting down options data manager...")
+        if hasattr(options_data_manager, 'shutdown'):
+            options_data_manager.shutdown()
+    
+    logger.info("Cleanup complete")
 
 def find_available_port(start_port, max_attempts=10):
     """Find an available port starting from start_port"""
@@ -126,6 +143,9 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Register cleanup function
+    atexit.register(cleanup)
+    
     # Start backend in a separate thread
     backend_thread = threading.Thread(target=run_backend, daemon=True)
     backend_thread.start()
@@ -146,4 +166,5 @@ if __name__ == '__main__':
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received, shutting down...")
+        cleanup()
         sys.exit(0) 

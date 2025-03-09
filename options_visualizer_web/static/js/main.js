@@ -121,6 +121,17 @@ function searchTicker() {
 function fetchOptionsData(ticker, isPolling = false) {
     console.log(`Fetching options data for ${ticker}, polling: ${isPolling}`);
     
+    // If this is the first request (not polling), show a loading state immediately
+    if (!isPolling) {
+        elements.statusLabel.textContent = `Loading ${ticker} data...`;
+        elements.searchBtn.disabled = true;
+        hideError(); // Clear any previous errors
+        
+        // Disable navigation buttons during initial load
+        elements.prevBtn.disabled = true;
+        elements.nextBtn.disabled = true;
+    }
+    
     // Log the URL we're fetching from
     const url = `${CONFIG.BACKEND_URL}/api/options/${ticker}`;
     console.log(`Fetching from URL: ${url}`);
@@ -137,10 +148,25 @@ function fetchOptionsData(ticker, isPolling = false) {
         if (!response.ok) {
             return response.json().then(data => {
                 console.error(`Error response data:`, data);
-                throw new Error(data.error || `Failed to fetch data for ${ticker}`);
+                throw new Error(data.message || data.error || `Failed to fetch data for ${ticker}`);
             });
         }
-        return response.json();
+        // Get the response text first to sanitize any NaN values
+        return response.text();
+    })
+    .then(text => {
+        // Replace NaN with null in the JSON string
+        const sanitizedText = text.replace(/:\s*NaN\b/g, ': null').replace(/:\s*-NaN\b/g, ': null');
+        try {
+            const parsedData = JSON.parse(sanitizedText);
+            // Further sanitize the parsed data to catch any NaN values that might have slipped through
+            return sanitizeData(parsedData);
+        } catch (error) {
+            console.error('Error parsing JSON:', error);
+            console.error('Response text:', text);
+            console.error('Sanitized text:', sanitizedText);
+            throw new Error(`Failed to parse response for ${ticker}: ${error.message}`);
+        }
     })
     .then(data => {
         console.log(`Received data for ${ticker}:`, data);
@@ -148,13 +174,53 @@ function fetchOptionsData(ticker, isPolling = false) {
         // Update UI state
         elements.searchBtn.disabled = false;
         
-        if (data.status === 'loading') {
-            console.log(`Data for ${ticker} is still loading, progress: ${data.progress}`);
-            // Data is still loading, start polling
-            elements.statusLabel.textContent = `Loading ${ticker} data... (${Math.round(data.progress || 0)}%)`;
+        // Handle loading state
+        if (data.status === 'loading' || data.status === 'partial') {
+            // Ensure progress is a valid number between 0 and 1
+            const progress = typeof data.progress === 'number' && !isNaN(data.progress) 
+                ? Math.max(0, Math.min(1, data.progress)) 
+                : 0;
+            
+            const progressPercent = Math.round(progress * 100);
+            const progressText = progressPercent > 0 ? `(${progressPercent}%)` : '';
+            
+            const statusMessage = data.status === 'loading' 
+                ? `Loading ${ticker} data... ${progressText}` 
+                : `Partial data for ${ticker} ${progressText}`;
+            
+            console.log(`Data for ${ticker} is still loading/partial, progress: ${progress}`);
+            elements.statusLabel.textContent = statusMessage;
+            
+            // Show a friendly message in the error area (not as an error)
+            const loadingMessage = data.status === 'loading'
+                ? `First time loading ${ticker}. Please wait while we fetch and process the data...`
+                : `Loading more data for ${ticker}. Partial data is displayed.`;
+            
+            showError(loadingMessage, true);
+            
+            // Start polling if not already polling
             if (!isPolling) {
-                startPolling(ticker);
+                startPolling(ticker, data.status === 'loading');
             }
+            
+            // If we have partial data, we can still display it
+            if (data.status === 'partial' && data.options_data && data.options_data.length > 0) {
+                // Process the partial data
+                processReceivedData(data, ticker);
+            }
+            
+            return;
+        }
+        
+        // Hide any info messages
+        elements.errorMessage.style.display = 'none';
+        
+        // Handle error state
+        if (data.status === 'error') {
+            console.error(`Error fetching data for ${ticker}:`, data.message || data.error);
+            showError(data.message || data.error || `Failed to fetch data for ${ticker}`);
+            stopPolling();
+            elements.statusLabel.textContent = `Error: ${data.message || 'Failed to fetch data'}`;
             return;
         }
         
@@ -163,86 +229,142 @@ function fetchOptionsData(ticker, isPolling = false) {
             stopPolling();
         }
         
-        // Process the data
-        state.symbol = ticker;
-        state.currentPrice = data.current_price;
-        
-        // Format expiry dates consistently
-        state.expiryDates = (data.expiry_dates || []).map(date => {
-            // Check if the date is already a string in YYYY-MM-DD format
-            if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-                return date;
-            }
-            // If it's a timestamp or other format, convert to YYYY-MM-DD
-            return new Date(date).toISOString().split('T')[0];
-        });
-        
-        // Process options data to ensure consistent date format
-        state.optionsData = (data.options_data || []).map(item => {
-            // Create a new object to avoid modifying the original
-            const newItem = {...item};
-            
-            // Ensure expiration is in YYYY-MM-DD format
-            if (newItem.expiration) {
-                if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
-                    // Already in the correct format
-                } else {
-                    // Convert to YYYY-MM-DD
-                    newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
-                }
-            }
-            
-            return newItem;
-        });
-        
-        state.lastUpdateTime = new Date();
-        state.lastProcessedDates = data.processed_dates || 0;
-        state.totalDates = data.total_dates || 0;
-        
-        console.log(`Processed data for ${ticker}:`, {
-            currentPrice: state.currentPrice,
-            expiryDates: state.expiryDates.length,
-            optionsData: state.optionsData.length,
-            lastProcessedDates: state.lastProcessedDates,
-            totalDates: state.totalDates
-        });
-        
-        // Update status label
-        if (data.status === 'partial') {
-            const percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
-            elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
-            
-            // Start polling for updates if not already polling
-            if (!isPolling) {
-                startPolling(ticker);
-            }
-        } else {
-            elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
-        }
-        
-        // Reset expiry index if needed
-        if (state.currentExpiryIndex >= state.expiryDates.length) {
-            state.currentExpiryIndex = 0;
-        }
-        
-        // Update navigation buttons
-        updateExpiryDisplay();
-        
-        // Update the plot
-        updatePlot();
+        // Process the complete data
+        processReceivedData(data, ticker);
     })
     .catch(error => {
         console.error(`Error fetching data for ${ticker}:`, error);
         elements.searchBtn.disabled = false;
-        elements.statusLabel.textContent = `Error loading ${ticker} data`;
-        showError(error.message);
-        stopPolling();
+        
+        // Check if the error message indicates the data is still being processed
+        if (error.message && (
+            error.message.includes("Unknown error occurred") || 
+            error.message.includes("still loading") ||
+            error.message.includes("processing") ||
+            error.message.includes("fetching")
+        )) {
+            // This is likely a new ticker being processed for the first time
+            elements.statusLabel.textContent = `Loading ${ticker} data... Please wait.`;
+            
+            // Show a friendly message
+            const loadingMessage = `First time loading ${ticker}. Please wait while we fetch and process the data...`;
+            showError(loadingMessage, true);
+            
+            // Start polling to check when data becomes available
+            if (!isPolling) {
+                startPolling(ticker, true);
+            }
+        } else {
+            // This is a real error
+            elements.statusLabel.textContent = `Error loading ${ticker} data`;
+            showError(error.message);
+            stopPolling();
+        }
     });
 }
 
+// Helper function to sanitize data by replacing NaN values with null
+function sanitizeData(obj) {
+    if (obj === null || obj === undefined) {
+        return obj;
+    }
+    
+    if (typeof obj === 'number' && isNaN(obj)) {
+        return null;
+    }
+    
+    if (Array.isArray(obj)) {
+        return obj.map(item => sanitizeData(item));
+    }
+    
+    if (typeof obj === 'object') {
+        const result = {};
+        for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                result[key] = sanitizeData(obj[key]);
+            }
+        }
+        return result;
+    }
+    
+    return obj;
+}
+
+// Process received data from the API
+function processReceivedData(data, ticker) {
+    // Process the data
+    state.symbol = ticker;
+    state.currentPrice = data.current_price;
+    
+    // Format expiry dates consistently
+    state.expiryDates = (data.expiry_dates || []).map(date => {
+        // Check if the date is already a string in YYYY-MM-DD format
+        if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return date;
+        }
+        // If it's a timestamp or other format, convert to YYYY-MM-DD
+        return new Date(date).toISOString().split('T')[0];
+    });
+    
+    // Process options data to ensure consistent date format
+    state.optionsData = (data.options_data || []).map(item => {
+        // Create a new object to avoid modifying the original
+        const newItem = {...item};
+        
+        // Ensure expiration is in YYYY-MM-DD format
+        if (newItem.expiration) {
+            if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
+                // Already in the correct format
+            } else {
+                // Convert to YYYY-MM-DD
+                newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
+            }
+        }
+        
+        return newItem;
+    });
+    
+    state.lastUpdateTime = new Date();
+    state.lastProcessedDates = data.processed_dates || 0;
+    state.totalDates = data.total_dates || 0;
+    
+    console.log(`Processed data for ${ticker}:`, {
+        currentPrice: state.currentPrice,
+        expiryDates: state.expiryDates.length,
+        optionsData: state.optionsData.length,
+        lastProcessedDates: state.lastProcessedDates,
+        totalDates: state.totalDates
+    });
+    
+    // Update status label
+    if (data.status === 'partial') {
+        // Calculate percentage, ensuring it's a valid number
+        let percent = 0;
+        if (state.totalDates > 0 && !isNaN(state.lastProcessedDates) && !isNaN(state.totalDates)) {
+            percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
+            // Ensure percent is a valid number between 0 and 100
+            percent = isNaN(percent) ? 0 : Math.max(0, Math.min(100, percent));
+        }
+        elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
+    } else {
+        elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
+    }
+    
+    // Reset expiry index if needed
+    if (state.currentExpiryIndex >= state.expiryDates.length) {
+        state.currentExpiryIndex = 0;
+    }
+    
+    // Update navigation buttons
+    updateExpiryDisplay();
+    
+    // Update the plot
+    updatePlot();
+}
+
 // Start polling for updates
-function startPolling(ticker) {
-    console.log(`Starting polling for ${ticker}`);
+function startPolling(ticker, isNewTicker = false) {
+    console.log(`Starting polling for ${ticker}, isNewTicker: ${isNewTicker}`);
     state.isPolling = true;
     
     // Clear any existing polling interval
@@ -250,11 +372,14 @@ function startPolling(ticker) {
         clearInterval(state.pollingInterval);
     }
     
-    // Set up new polling interval (every 5 seconds)
+    // Use a more frequent polling interval for new tickers (2 seconds instead of 5)
+    const pollingInterval = isNewTicker ? 2000 : CONFIG.POLLING_INTERVAL;
+    
+    // Set up new polling interval
     state.pollingInterval = setInterval(() => {
         console.log(`Polling for ${ticker} updates...`);
         fetchOptionsData(ticker, true);
-    }, CONFIG.POLLING_INTERVAL);
+    }, pollingInterval);
 }
 
 // Stop polling for updates
@@ -583,10 +708,17 @@ function findAtmStrike(calls, puts, currentPrice) {
 }
 
 // Show error message
-function showError(message) {
+function showError(message, isInfo = false) {
     if (elements.errorMessage) {
         elements.errorMessage.textContent = message;
         elements.errorMessage.style.display = 'block';
+        
+        // Set the appropriate class based on whether this is an error or info message
+        if (isInfo) {
+            elements.errorMessage.className = 'info-message';
+        } else {
+            elements.errorMessage.className = ''; // Reset to default (error style)
+        }
     }
 }
 
@@ -594,6 +726,7 @@ function showError(message) {
 function hideError() {
     if (elements.errorMessage) {
         elements.errorMessage.style.display = 'none';
+        elements.errorMessage.textContent = '';
     }
 }
 
