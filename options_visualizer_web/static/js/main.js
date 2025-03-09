@@ -7,7 +7,13 @@ const FIELD_MAPPING = {
     "Ask": "ask",
     "Volume": "volume",
     "Intrinsic Value": "intrinsic_value",
-    "Extrinsic Value": "extrinsic_value"
+    "Extrinsic Value": "extrinsic_value",
+    "Delta": "delta",
+    "Gamma": "gamma",
+    "Theta": "theta",
+    "Vega": "vega",
+    "Rho": "rho",
+    "IV": "impliedVolatility"
 };
 
 // Price-related fields that need dollar formatting
@@ -420,20 +426,57 @@ function updatePlot() {
         const atm_strike = strikes.reduce((prev, curr) => 
             Math.abs(curr - state.currentPrice) < Math.abs(prev - state.currentPrice) ? curr : prev, strikes[0]);
 
-        // Calculate yMax
+        // Calculate yMin and yMax to handle negative values
         const yValues = [...calls.map(item => item[plotField]), ...puts.map(item => item[plotField])]
             .filter(y => y != null && !isNaN(y));
-        const yMax = yValues.length > 0 ? Math.max(...yValues) * 1.1 : 1;
+        
+        let yMin = 0;
+        let yMax = 1;
+        
+        if (yValues.length > 0) {
+            const minValue = Math.min(...yValues);
+            const maxValue = Math.max(...yValues);
+            
+            // If we have negative values, set yMin to include them with some padding
+            if (minValue < 0) {
+                yMin = minValue * 1.1; // Add 10% padding below the minimum
+            }
+            
+            // Set yMax with padding
+            yMax = maxValue * 1.1; // Add 10% padding above the maximum
+            
+            // Ensure there's always some vertical space even with small ranges
+            if (yMax - yMin < 0.1) {
+                const padding = 0.05;
+                yMin -= padding;
+                yMax += padding;
+            }
+        }
 
         // Get call and put values at ATM strike
         const callData = calls.find(item => Math.abs(item.strike - atm_strike) < 0.01);
         const putData = puts.find(item => Math.abs(item.strike - atm_strike) < 0.01);
+        
+        // Format values with appropriate sign for negative numbers
+        const formatValue = (value, isPrice) => {
+            if (value == null || isNaN(value)) return 'N/A';
+            
+            const prefix = isPrice ? '$' : '';
+            const sign = value < 0 ? '-' : '';
+            const absValue = Math.abs(value);
+            
+            if (Number.isInteger(absValue)) {
+                return `${sign}${prefix}${absValue}`;
+            } else {
+                return `${sign}${prefix}${absValue.toFixed(2)}`;
+            }
+        };
+        
         const callValue = callData && callData[plotField] != null && !isNaN(callData[plotField]) ?
-            (PRICE_FIELDS.includes(selectedPlotType) ? `$${callData[plotField].toFixed(2)}` :
-            (Number.isInteger(callData[plotField]) ? callData[plotField].toString() : callData[plotField].toFixed(2))) : 'N/A';
+            formatValue(callData[plotField], PRICE_FIELDS.includes(selectedPlotType)) : 'N/A';
+            
         const putValue = putData && putData[plotField] != null && !isNaN(putData[plotField]) ?
-            (PRICE_FIELDS.includes(selectedPlotType) ? `$${putData[plotField].toFixed(2)}` :
-            (Number.isInteger(putData[plotField]) ? putData[plotField].toString() : putData[plotField].toFixed(2))) : 'N/A';
+            formatValue(putData[plotField], PRICE_FIELDS.includes(selectedPlotType)) : 'N/A';
 
         // Define traces with initial values
         const callTrace = {
@@ -456,13 +499,13 @@ function updatePlot() {
             marker: { size: 6, color: 'red' }
         };
 
-        // Add current price line
+        // Add current price line that spans the full y-axis range
         const currentPriceLine = {
             x: [state.currentPrice, state.currentPrice],
-            y: [0, Math.max(...calls.map(item => item[plotField] || 0), ...puts.map(item => item[plotField] || 0)) * 1.1],
+            y: [yMin, yMax],
             type: 'scatter',
             mode: 'lines',
-            name: `Spot: $${state.currentPrice.toFixed(2)}`, // Changed from "Current Price"
+            name: `Spot: $${state.currentPrice.toFixed(2)}`,
             line: {
                 color: 'green',
                 width: 2,
@@ -470,9 +513,23 @@ function updatePlot() {
             }
         };
 
+        // Add zero line if we have negative values
+        let zeroLine = null;
+        if (yMin < 0) {
+            zeroLine = {
+                x: [Math.min(...strikes), Math.max(...strikes)],
+                y: [0, 0],
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Zero',
+                line: { color: 'gray', width: 1 },
+                hoverinfo: 'none'
+            };
+        }
+
         const hoverLine = {
             x: [atm_strike, atm_strike],
-            y: [0, yMax],
+            y: [yMin, yMax],
             type: 'scatter',
             mode: 'lines',
             name: `Strike: $${atm_strike.toFixed(2)}`,
@@ -486,7 +543,8 @@ function updatePlot() {
             xaxis: { title: 'Strike Price ($)', tickprefix: '$' },
             yaxis: {
                 title: PRICE_FIELDS.includes(selectedPlotType) ? `${selectedPlotType} ($)` : selectedPlotType,
-                tickprefix: PRICE_FIELDS.includes(selectedPlotType) ? '$' : ''
+                tickprefix: PRICE_FIELDS.includes(selectedPlotType) ? '$' : '',
+                range: [yMin, yMax]
             },
             hovermode: 'closest',
             showlegend: true,
@@ -496,6 +554,11 @@ function updatePlot() {
 
         // Create or update the plot
         const plotData = [callTrace, putTrace, currentPriceLine, hoverLine];
+        
+        // Add zero line if we have negative values
+        if (zeroLine) {
+            plotData.push(zeroLine);
+        }
 
         if (!state.plot) {
             // Create new plot

@@ -176,16 +176,33 @@ h1 {
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
 }
 
 .plot-options legend {
     padding: 0 10px;
     font-weight: bold;
+    grid-column: 1 / -1;
 }
 
 .plot-options label {
-    margin-right: 15px;
+    margin-right: 0;
     cursor: pointer;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .plot-options fieldset {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .plot-options fieldset {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 /* Plot container */

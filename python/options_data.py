@@ -16,7 +16,7 @@ from typing import Dict, Optional, Callable, Tuple, List, Any, Union
 # Import the finance API and models
 from python.yahoo_finance import YahooFinanceAPI
 from python.models.black_scholes import (
-    call_price, put_price, delta, gamma, theta, vega, rho, implied_volatility
+    call_price, put_price, delta, gamma, theta, vega, rho, implied_volatility, calculate_all_greeks
 )
 from python.cache_manager import OptionsCache
 
@@ -210,28 +210,19 @@ class OptionsDataManager:
         }
         
         try:
-            # Create a new thread for fetching
-            thread = threading.Thread(
-                target=self._fetch_options_data,
-                args=(ticker,),
-                daemon=True
-            )
-            thread.start()
-            logger.info(f"Background fetch thread started for {ticker}")
-            return True
-        except Exception as e:
-            # Use a lock to prevent multiple threads from fetching the same ticker
+            # Get or create a lock for this ticker
             if ticker not in self._fetch_locks:
                 self._fetch_locks[ticker] = threading.Lock()
-                
+            
+            # Use the ticker-specific lock for thread safety
             with self._fetch_locks[ticker]:
                 # Check if another thread has already completed the fetch
                 if ticker not in self._loading_state:
                     logger.info(f"Fetch for {ticker} was already completed by another thread")
                     return
-                    
+                
                 # Get skip_interpolation setting from loading state
-                skip_interpolation = self._loading_state.get(ticker, {}).get('skip_interpolation', False)  # Default to False to ensure interpolation
+                skip_interpolation = self._loading_state.get(ticker, {}).get('skip_interpolation', False)
                 logger.info(f"Fetching data for {ticker} with skip_interpolation={skip_interpolation}")
                 
                 # Collect all raw data first without processing
@@ -255,11 +246,13 @@ class OptionsDataManager:
                         
                         # Store raw data in cache for quick recovery in case of crash
                         try:
-                            # Mark this as unprocessed data by not including a 'dataset' key
-                            # Add a flag to indicate this is raw data (not interpolated)
-                            raw_data_collection['_is_fully_interpolated'] = False
-                            self._cache.set(ticker, raw_data_collection, current_price, len(raw_data_collection), total_dates)
-                            logger.info(f"Cached raw data for {ticker} with {len(raw_data_collection)}/{total_dates} dates")
+                            # Use the cache's ticker lock for thread safety
+                            with self._cache.get_lock(ticker):
+                                # Mark this as unprocessed data by not including a 'dataset' key
+                                # Add a flag to indicate this is raw data (not interpolated)
+                                raw_data_collection['_is_fully_interpolated'] = False
+                                self._cache.set(ticker, raw_data_collection, current_price, len(raw_data_collection), total_dates)
+                                logger.info(f"Cached raw data for {ticker} with {len(raw_data_collection)}/{total_dates} dates")
                         except Exception as e:
                             logger.error(f"Error caching raw data for {ticker}: {str(e)}")
                 
@@ -267,7 +260,9 @@ class OptionsDataManager:
                 logger.info(f"Fetching data for {ticker} in background thread")
                 
                 try:
-                    options_data_dict, current_price = self.api.get_options_data(ticker, cache_update_callback)
+                    # Use the cache's ticker lock for thread safety during API fetch
+                    with self._cache.get_lock(ticker):
+                        options_data_dict, current_price = self.api.get_options_data(ticker, cache_update_callback)
                 except Exception as fetch_error:
                     logger.error(f"Error fetching data from API for {ticker}: {str(fetch_error)}")
                     logger.error(traceback.format_exc())
@@ -279,11 +274,12 @@ class OptionsDataManager:
                         current_price = final_current_price
                     else:
                         # Check if we have cached data we can use
-                        cached_data = self._cache.get(ticker)
-                        if cached_data and 'data' in cached_data and 'price' in cached_data:
+                        with self._cache.get_lock(ticker):
+                            cached_data = self._cache.get(ticker)
+                        if cached_data and cached_data[0] is not None and cached_data[1] is not None:
                             logger.info(f"Using cached data for {ticker} due to API error")
-                            options_data_dict = cached_data['data']
-                            current_price = cached_data['price']
+                            options_data_dict = cached_data[0]
+                            current_price = cached_data[1]
                         else:
                             # No data available
                             logger.error(f"No data available for {ticker} after API error")
@@ -302,45 +298,61 @@ class OptionsDataManager:
                         logger.info(f"Processing complete data for {ticker} with {processed_dates} dates")
                         # Always process with interpolation for the final cached version
                         # This is the key change - we're forcing interpolation for the cached version
-                        processor = OptionsDataProcessor(raw_data_collection, final_current_price, 
-                                                        is_processed=False, 
-                                                        skip_interpolation=False)  # Always do interpolation for cached data
                         
-                        # Get the fully processed data with interpolation
-                        processed_data = processor.options_data
-                        
-                        # Add a flag to indicate this data is fully interpolated
-                        processed_data['_is_fully_interpolated'] = True
-                        
-                        # Ensure all plot types are calculated and available
-                        # This is critical for frontend performance
-                        all_fields_available = True
-                        required_fields = [
-                            'mid_price', 'delta', 'gamma', 'theta', 'impliedVolatility',
-                            'volume', 'spread', 'intrinsic_value', 'extrinsic_value'
-                        ]
-                        
-                        for field in required_fields:
-                            if field not in processed_data.data_vars:
-                                logger.warning(f"Field {field} is missing from processed data")
-                                all_fields_available = False
-                        
-                        if not all_fields_available:
-                            logger.warning(f"Some required plot fields are missing - forcing post-processing")
-                            # Force post-processing to ensure all fields are available
-                            processor._ensure_all_plot_fields()
-                            processor.apply_floors()
+                        # Use the cache's ticker lock for thread safety during processing
+                        with self._cache.get_lock(ticker):
+                            processor = OptionsDataProcessor(raw_data_collection, final_current_price, 
+                                                            is_processed=False, 
+                                                            skip_interpolation=False)  # Always do interpolation for cached data
+                            
+                            # Check if processor has a valid dataset before proceeding
+                            if processor.ds is None:
+                                logger.error(f"Processor dataset is None for {ticker}")
+                                # Fall back to caching raw data
+                                raw_data_collection['_is_fully_interpolated'] = False
+                                self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
+                                return
+                            
+                            # Get the fully processed data with interpolation
                             processed_data = processor.options_data
-                        
-                        # Final update to cache with fully processed data
-                        self._cache.set(ticker, processed_data, final_current_price, processed_dates, total_dates)
-                        logger.info(f"Cached fully processed data for {ticker} with {processed_dates}/{total_dates} dates (with interpolation)")
+                            
+                            # Add a flag to indicate this data is fully interpolated
+                            processed_data['_is_fully_interpolated'] = True
+                            
+                            # Ensure all plot types are calculated and available
+                            # This is critical for frontend performance
+                            all_fields_available = True
+                            required_fields = [
+                                'mid_price', 'delta', 'gamma', 'theta', 'impliedVolatility',
+                                'volume', 'spread', 'intrinsic_value', 'extrinsic_value'
+                            ]
+                            
+                            # Check if processed_data has data_vars attribute
+                            if hasattr(processed_data, 'data_vars'):
+                                for field in required_fields:
+                                    if field not in processed_data.data_vars:
+                                        logger.warning(f"Field {field} is missing from processed data")
+                                        all_fields_available = False
+                                
+                                if not all_fields_available:
+                                    logger.warning(f"Some required plot fields are missing - forcing post-processing")
+                                    # Force post-processing to ensure all fields are available
+                                    processor._ensure_all_plot_fields()
+                                    processor.apply_floors()
+                                    processed_data = processor.options_data
+                            else:
+                                logger.warning(f"Processed data does not have data_vars attribute")
+                            
+                            # Final update to cache with fully processed data
+                            self._cache.set(ticker, processed_data, final_current_price, processed_dates, total_dates)
+                            logger.info(f"Cached fully processed data for {ticker} with {processed_dates}/{total_dates} dates (with interpolation)")
                     except Exception as proc_error:
                         logger.error(f"Error processing complete data for {ticker}: {str(proc_error)}")
                         logger.error(traceback.format_exc())
                         # Fall back to caching raw data
-                        raw_data_collection['_is_fully_interpolated'] = False
-                        self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
+                        with self._cache.get_lock(ticker):
+                            raw_data_collection['_is_fully_interpolated'] = False
+                            self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
                     
                     logger.info(f"Completed fetching data for {ticker} with {processed_dates} dates")
                 elif isinstance(options_data_dict, dict) and current_price:
@@ -350,42 +362,55 @@ class OptionsDataManager:
                     total_dates = processed_dates  # Assume all dates are processed
                     
                     try:
-                        # Process the data
-                        processor = OptionsDataProcessor(options_data_dict, current_price,
-                                                        is_processed=False,
-                                                        skip_interpolation=False)  # Always do interpolation for cached data
-                        processed_data = processor.options_data
-                        
-                        # Add a flag to indicate this data is fully interpolated
-                        processed_data['_is_fully_interpolated'] = True
-                        
-                        # Update cache with the processed data
-                        self._cache.set(ticker, processed_data, current_price, processed_dates, total_dates)
-                        logger.info(f"Cached processed data for {ticker} with {processed_dates}/{total_dates} dates")
+                        # Process the data with the ticker lock
+                        with self._cache.get_lock(ticker):
+                            # Process the data
+                            processor = OptionsDataProcessor(options_data_dict, current_price,
+                                                            is_processed=False,
+                                                            skip_interpolation=False)  # Always do interpolation for cached data
+                            
+                            # Check if processor has a valid dataset
+                            if processor.ds is None:
+                                logger.error(f"Processor dataset is None for {ticker}")
+                                # Fall back to caching raw data
+                                options_data_dict['_is_fully_interpolated'] = False
+                                self._cache.set(ticker, options_data_dict, current_price, processed_dates, total_dates)
+                                return
+                                
+                            processed_data = processor.options_data
+                            
+                            # Add a flag to indicate this data is fully interpolated
+                            processed_data['_is_fully_interpolated'] = True
+                            
+                            # Update cache with the processed data
+                            self._cache.set(ticker, processed_data, current_price, processed_dates, total_dates)
+                            logger.info(f"Cached processed data for {ticker} with {processed_dates}/{total_dates} dates")
                     except Exception as proc_error:
                         logger.error(f"Error processing API data for {ticker}: {str(proc_error)}")
                         logger.error(traceback.format_exc())
                         # Fall back to caching raw data
-                        options_data_dict['_is_fully_interpolated'] = False
-                        self._cache.set(ticker, options_data_dict, current_price, processed_dates, total_dates)
+                        with self._cache.get_lock(ticker):
+                            options_data_dict['_is_fully_interpolated'] = False
+                            self._cache.set(ticker, options_data_dict, current_price, processed_dates, total_dates)
                 elif hasattr(options_data_dict, 'options_data') and current_price:
                     # Handle the case where options_data is already an OptionsDataProcessor
                     logger.info(f"Received OptionsDataProcessor for {ticker}")
                     # Get the number of expiration dates from the processor
                     try:
-                        processor = options_data_dict
-                        processed_data = processor.options_data
-                        # Get the number of expiration dates
-                        expiry_dates = processor.get_expirations()
-                        processed_dates = len(expiry_dates) if expiry_dates else 0
-                        total_dates = processed_dates
-                        
-                        # Add a flag to indicate this data is fully interpolated
-                        processed_data['_is_fully_interpolated'] = True
-                        
-                        # Update cache with the processed data
-                        self._cache.set(ticker, processed_data, current_price, processed_dates, total_dates)
-                        logger.info(f"Cached processed data for {ticker} with {processed_dates} dates")
+                        with self._cache.get_lock(ticker):
+                            processor = options_data_dict
+                            processed_data = processor.options_data
+                            # Get the number of expiration dates
+                            expiry_dates = processor.get_expirations()
+                            processed_dates = len(expiry_dates) if expiry_dates else 0
+                            total_dates = processed_dates
+                            
+                            # Add a flag to indicate this data is fully interpolated
+                            processed_data['_is_fully_interpolated'] = True
+                            
+                            # Update cache with the processed data
+                            self._cache.set(ticker, processed_data, current_price, processed_dates, total_dates)
+                            logger.info(f"Cached processed data for {ticker} with {processed_dates} dates")
                     except Exception as proc_error:
                         logger.error(f"Error processing processor data for {ticker}: {str(proc_error)}")
                         logger.error(traceback.format_exc())
@@ -419,44 +444,69 @@ class OptionsDataManager:
         Returns:
             Tuple of (processor, price) - may be (None, None) if no cache and fetch just started
         """
-        # Check cache first
-        processor, price, timestamp, progress = self.get_current_processor(ticker)
-        
-        # If we have cached data (partial or complete), return it immediately
-        if processor is not None and price is not None:
-            # Force reinterpolation if requested
-            if force_reinterpolate and processor:
-                logger.info(f"Forcing reinterpolation for {ticker}")
-                processor.force_reinterpolate()
-                
-                # Update cache with reinterpolated data
-                # Get the number of expiration dates as processed_dates
-                expiry_count = len(processor.get_expirations())
-                
-                # Add a flag to indicate this data is fully interpolated
-                processor.options_data['_is_fully_interpolated'] = True
-                
-                self._cache.set(ticker, processor.options_data, price, expiry_count, expiry_count)
-                logger.info(f"Updated cache for {ticker} with reinterpolated data")
-                
-            if progress_callback and processor:
-                # Call progress callback with current state
-                expiry_count = len(processor.get_expirations())
-                
-                # Get total count from loading state
-                total_count = self._loading_state.get(ticker, {}).get('total_dates', expiry_count)
-                
-                progress_callback(processor.options_data, price, expiry_count, total_count)
-            return processor, price
+        # Use the ticker-specific lock for thread safety
+        with self._cache.get_lock(ticker):
+            # Check cache first
+            processor, price, status, progress = self.get_current_processor(ticker)
             
-        # No cache available, start background fetch
-        self.start_fetching(ticker)
+            # If we have cached data (partial or complete), return it immediately
+            if processor is not None and price is not None:
+                # Force reinterpolation if requested
+                if force_reinterpolate and processor:
+                    logger.info(f"Forcing reinterpolation for {ticker}")
+                    processor.force_reinterpolate()
+                    
+                    # Update cache with reinterpolated data
+                    # Get the number of expiration dates as processed_dates
+                    expiry_count = len(processor.get_expirations())
+                    
+                    # Add a flag to indicate this data is fully interpolated
+                    processor.options_data['_is_fully_interpolated'] = True
+                    
+                    self._cache.set(ticker, processor.options_data, price, expiry_count, expiry_count)
+                    logger.info(f"Updated cache for {ticker} with reinterpolated data")
+                    
+                if progress_callback and processor:
+                    # Call progress callback with current state
+                    expiry_count = len(processor.get_expirations())
+                    
+                    # Get total count from loading state
+                    total_count = self._loading_state.get(ticker, {}).get('total_dates', expiry_count)
+                    
+                    progress_callback(processor.options_data, price, expiry_count, total_count)
+                return processor, price
         
-        # Return None to indicate fetch has started but no data available yet
+        # If we get here, we don't have cached data or it's expired
+        # Start a background fetch if not already loading
+        if status != 'loading':
+            self.start_fetching(ticker)
+            
+        # Return None, None to indicate we're fetching
         return None, None
 
     def get_risk_free_rate(self):
-        return YahooFinanceAPI().get_risk_free_rate("^TNX")
+        """Get the risk-free rate for option pricing."""
+        # Check if we already have a risk-free rate
+        if hasattr(self, 'risk_free_rate') and self.risk_free_rate is not None:
+            return self.risk_free_rate
+            
+        # Default risk-free rate if we can't get it from the API
+        default_rate = 0.04  # 4%
+        
+        try:
+            # Try to get from YahooFinanceAPI
+            api = YahooFinanceAPI()
+            rate = api.get_risk_free_rate()
+            logger.info(f"Got risk-free rate from API: {rate:.2%}")
+            # Set the instance attribute
+            self.risk_free_rate = rate
+            return rate
+        except Exception as e:
+            logger.error(f"Error getting risk-free rate: {str(e)}")
+            logger.info(f"Using default risk-free rate: {default_rate:.2%}")
+            # Set the instance attribute to the default value
+            self.risk_free_rate = default_rate
+            return default_rate
 
     def calculate_option_price(self, S: float, K: float, T: float, r: float, sigma: float, option_type: str) -> float:
         if self.pricing_model == self.MODEL_BLACK_SCHOLES:
@@ -487,7 +537,7 @@ class OptionsDataProcessor:
         self.max_strike = None
         self.skip_interpolation = skip_interpolation
         self.ds = None  # Initialize dataset to None
-        self.risk_free_rate = None
+        self.risk_free_rate = None  # Initialize risk_free_rate to None
         
         if not options_data:
             logger.error("Failed to fetch options.")
@@ -549,12 +599,17 @@ class OptionsDataProcessor:
                     logger.warning("Processed data from cache does not contain a dataset")
                 
                 # Get risk-free rate if available
-                self.risk_free_rate = processed_data.get('risk_free_rate', self.get_risk_free_rate())
+                if 'risk_free_rate' in processed_data:
+                    self.risk_free_rate = processed_data.get('risk_free_rate')
+                else:
+                    self.risk_free_rate = self.get_risk_free_rate()
             else:
                 logger.warning(f"Processed data from cache is not a dictionary: {type(options_data).__name__}")
                 # Try to process the data as raw data
                 logger.info("Attempting to process as raw data")
                 is_processed = False
+                # Initialize risk_free_rate
+                self.risk_free_rate = self.get_risk_free_rate()
         
         # If not processed or no dataset was found, process the raw data
         if not is_processed or self.ds is None:
@@ -573,19 +628,11 @@ class OptionsDataProcessor:
                 # Only interpolate if not skipped
                 if not skip_interpolation:
                     start_time = time.time()
-                    num_dates = len(self.get_expirations())
                     
-                    # Try 2D interpolation first (default approach)
-                    if num_dates >= 2:
-                        logger.info(f"Using 2D interpolation for {num_dates} expiration dates")
-                        self.interpolate_missing_values_2d()
-                    # Fall back to 1D interpolation only if there's a single date
-                    elif num_dates == 1:
-                        logger.info("Falling back to 1D interpolation for single expiration date")
-                        self.interpolate_missing_values_1d()
-                    else:
-                        logger.warning("No expiration dates found, skipping interpolation")
-                        
+                    # Perform 2D interpolation
+                    logger.info("Performing 2D interpolation")
+                    self.interpolate_missing_values_2d()
+                    
                     interpolate_time = time.time() - start_time
                     logger.info(f"Interpolation completed in {interpolate_time:.2f} seconds")
                 else:
@@ -596,7 +643,9 @@ class OptionsDataProcessor:
                 post_process_time = time.time() - start_time
                 logger.info(f"Post-processing completed in {post_process_time:.2f} seconds")
                 
-                self.risk_free_rate = self.get_risk_free_rate()
+                # Initialize risk_free_rate if not already set
+                if self.risk_free_rate is None:
+                    self.risk_free_rate = self.get_risk_free_rate()
                 
                 # Store processed data for caching
                 self.options_data = {
@@ -887,10 +936,8 @@ class OptionsDataProcessor:
             
             if valid_mask.any():
                 spreads = (da_ask - da_bid).where(valid_mask)
-                avg_spread = spreads.mean().item()
-            else:
-                avg_spread = 0.01  # Default spread if no valid bid/ask pairs
-                
+            avg_spread = spreads.mean().item()
+            
             # Step 3: Handle non-price fields like volume and openInterest separately
             # These should not be interpolated like continuous values
             for field in non_price_fields:
@@ -971,77 +1018,128 @@ class OptionsDataProcessor:
 
     def interpolate_missing_values_2d(self):
         """
-        Interpolate ONLY missing values (NaN, zero, or invalid) in 2D (across strikes and expiration dates).
-        First interpolates implied volatility surface, then uses it with Black-Scholes for all price fields.
-        Preserves all valid market data from Yahoo Finance.
+        Interpolate missing values (NaN or zero) in 2D (across strikes and expiration dates).
+        Uses xarray's interpolate_na functionality after converting zeros to NaN.
         """
         if not self.ds:
             logger.error("Cannot interpolate: No dataset available")
             return
-        logger.info("Starting 2D interpolation using IV surface with Black-Scholes model")
-
-        S = self.current_price
-        r = self.get_risk_free_rate()
-        dtes = self.ds.DTE.values
-        if len(dtes) < 2:
-            logger.info(f"Only {len(dtes)} DTE value(s) found, skipping 2D interpolation")
-            return
+        logger.info("Starting 2D interpolation using xarray's interpolate_na")
 
         # Define fields to process
-        price_fields = ['bid', 'ask', 'mid_price', 'price', 'extrinsic_value']
+        price_fields = ['bid', 'ask', 'mid_price', 'price', 'lastPrice', 'intrinsic_value', 'extrinsic_value']
         # Define non-price fields that need special handling
-        non_price_fields = ['volume', 'openInterest']
-
+        non_price_fields = ['volume', 'openInterest', 'impliedVolatility']
+        
+        # Process all fields
+        all_fields = price_fields + non_price_fields
+        
         for opt_type in ['call', 'put']:
-            # Step 1: Create a smooth IV surface by interpolating impliedVolatility in 2D
-            da_iv = self.ds['impliedVolatility'].sel(option_type=opt_type)
-            
-            # Store original IV values to preserve them
-            original_iv = da_iv.values.copy()
-            
-            # Get grid coordinates
-            strikes = da_iv.strike.values
-            strike_grid, dte_grid = np.meshgrid(strikes, dtes, indexing='ij')
-            points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
-            values_flat = da_iv.values.ravel()
-            
-            # Only consider valid IV values (not NaN and > 0)
-            valid_mask = ~np.isnan(values_flat) & (values_flat > 0)
-            
-            if valid_mask.sum() > 3:  # Need at least 4 points for 2D interpolation
-                # Perform 2D interpolation on valid points - use cubic if possible for smoother surface
+            for field in all_fields:
+                if field not in self.ds:
+                    logger.warning(f"Field {field} not found in dataset, skipping")
+                    continue
+                
                 try:
-                    # Try cubic interpolation first for smoother IV surface
-                    interpolated_values = griddata(
-                        points[valid_mask],
-                        values_flat[valid_mask],
-                        (strike_grid, dte_grid),
-                        method='cubic'
-                    )
+                    # Get the data array for this field and option type
+                    da = self.ds[field].sel(option_type=opt_type)
                     
-                    # Fill any NaNs from cubic with linear interpolation
-                    nan_mask = np.isnan(interpolated_values)
-                    if nan_mask.any():
-                        linear_values = griddata(
-                            points[valid_mask],
-                            values_flat[valid_mask],
-                            (strike_grid, dte_grid),
-                            method='linear'
-                        )
-                        interpolated_values[nan_mask] = linear_values[nan_mask]
+                    # First, convert zeros to NaN for proper interpolation
+                    # Only do this for fields where zero is not a valid value
+                    if field not in ['volume', 'openInterest']:
+                        da = da.where(da != 0)
                     
-                    # Apply additional smoothing to reduce high-frequency noise
-                    # Use a Gaussian filter with adaptive sigma based on DTE
-                    from scipy.ndimage import gaussian_filter
+                    # Use xarray's built-in interpolation for NaN values
+                    # First interpolate along strike dimension
+                    da_interp = da.interpolate_na(dim='strike', method='linear')
                     
-                    # Reshape to match the original grid shape for proper smoothing
-                    interpolated_values_reshaped = interpolated_values.reshape(len(strikes), len(dtes))
+                    # Then interpolate along DTE dimension
+                    da_interp = da_interp.interpolate_na(dim='DTE', method='linear')
                     
-                    # Apply stronger smoothing for longer-dated options to reduce oscillations
-                    # Create a smoothed version for each DTE slice with appropriate sigma
-                    for i, dte in enumerate(dtes):
-                        # Adaptive sigma: more smoothing for longer-dated options
-                        # This helps reduce oscillations in far-dated options
+                    # For any remaining NaN values, use griddata for 2D interpolation
+                    if da_interp.isnull().any():
+                        logger.info(f"Using griddata for remaining NaN values in {field} for {opt_type}")
+                        
+                        # Get the coordinates
+                        strikes = da.strike.values
+                        dtes = da.DTE.values
+                        
+                        # Create meshgrid for all points
+                        strike_grid, dte_grid = np.meshgrid(strikes, dtes, indexing='ij')
+                        points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
+                        
+                        # Get the values and mask of valid (non-NaN) points
+                        values = da_interp.values
+                        valid_mask = ~np.isnan(values)
+                        
+                        if np.sum(valid_mask) > 3:  # Need at least 4 points for interpolation
+                            # Get coordinates of valid points
+                            valid_points = []
+                            valid_values = []
+                            
+                            for i, strike in enumerate(strikes):
+                                for j, dte in enumerate(dtes):
+                                    if not np.isnan(values[i, j]):
+                                        valid_points.append([strike, dte])
+                                        valid_values.append(values[i, j])
+                            
+                            # Convert to numpy arrays
+                            valid_points = np.array(valid_points)
+                            valid_values = np.array(valid_values)
+                            
+                            # Create target points for all grid points
+                            target_points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
+                            
+                            # Interpolate using griddata
+                            from scipy.interpolate import griddata
+                            interp_values = griddata(
+                                valid_points,
+                                valid_values,
+                                target_points,
+                                method='linear',
+                                fill_value=np.nan
+                            )
+                            
+                            # Reshape back to original grid shape
+                            interp_values = interp_values.reshape(len(strikes), len(dtes))
+                            
+                            # Update the interpolated array
+                            da_interp.values = interp_values
+                    
+                    # Update the dataset with interpolated values
+                    self.ds[field].loc[{'option_type': opt_type}] = da_interp
+                    
+                    logger.info(f"Successfully interpolated {field} for {opt_type}")
+                except Exception as e:
+                    logger.error(f"Error interpolating {field} for {opt_type}: {str(e)}")
+                    logger.error(traceback.format_exc())
+        
+        # Apply smoothing to reduce noise in the interpolated data
+        self._apply_smoothing()
+        
+        logger.info("2D interpolation completed")
+
+    def _apply_smoothing(self):
+        """Apply smoothing to reduce noise in the interpolated data."""
+        try:
+            from scipy.ndimage import gaussian_filter
+            
+            logger.info("Applying smoothing to reduce noise in interpolated data")
+            
+            # Fields that benefit from smoothing
+            smooth_fields = ['mid_price', 'price', 'impliedVolatility', 'bid', 'ask']
+            
+            for opt_type in ['call', 'put']:
+                for field in smooth_fields:
+                    if field not in self.ds:
+                        continue
+                    
+                    # Get the data array
+                    da = self.ds[field].sel(option_type=opt_type)
+                    
+                    # Apply smoothing for each DTE slice with adaptive sigma
+                    for i, dte in enumerate(self.ds.DTE.values):
+                        # Adaptive sigma based on DTE
                         if dte <= 30:  # Short-dated options (< 1 month)
                             sigma = 0.7
                         elif dte <= 90:  # Medium-dated options (1-3 months)
@@ -1057,287 +1155,82 @@ class OptionsDataProcessor:
                             additional_sigma = min(2.5, (dte - 730) / 365.0)
                             sigma = base_sigma + additional_sigma
                         
-                        # Apply 1D Gaussian smoothing to this DTE slice
-                        interpolated_values_reshaped[:, i] = gaussian_filter(
-                            interpolated_values_reshaped[:, i], 
-                            sigma=sigma
-                        )
+                        # Get the slice for this DTE
+                        slice_values = da.isel(DTE=i).values
                         
-                        # For very long-dated options, apply a second pass with a larger window
-                        if dte > 730:
-                            # Second pass with larger sigma for extreme smoothing of LEAPS
-                            interpolated_values_reshaped[:, i] = gaussian_filter(
-                                interpolated_values_reshaped[:, i], 
-                                sigma=sigma * 0.5  # Half the sigma for second pass
-                            )
-                    
-                    # Keep the reshaped version (don't flatten back)
-                    interpolated_values = interpolated_values_reshaped
+                        # Skip if all values are NaN
+                        if np.all(np.isnan(slice_values)):
+                            continue
                         
-                    logger.info(f"Created smooth IV surface for {opt_type} using cubic interpolation with linear fallback and adaptive Gaussian smoothing")
-                except Exception as e:
-                    # Fallback to linear if cubic fails
-                    logger.warning(f"Cubic interpolation failed: {str(e)}. Falling back to linear.")
-                    interpolated_values = griddata(
-                        points[valid_mask],
-                        values_flat[valid_mask],
-                        (strike_grid, dte_grid),
-                        method='linear'
-                    )
-                    
-                    # Apply light smoothing even with linear interpolation
-                    try:
-                        from scipy.ndimage import gaussian_filter
-                        
-                        # Reshape to match the original grid shape for proper smoothing
-                        interpolated_values_reshaped = interpolated_values.reshape(len(strikes), len(dtes))
-                        
-                        # Apply adaptive smoothing based on DTE
-                        for i, dte in enumerate(dtes):
-                            if dte <= 30:
-                                sigma = 0.5
-                            elif dte <= 90:
-                                sigma = 0.8
-                            elif dte <= 365:
-                                sigma = 1.2
-                            else:
-                                # Reduce excessive smoothing for LEAPS
-                                sigma = 1.2 + min(1.0, (dte / 730.0))
+                        # Replace NaNs with nearest valid values for smoothing
+                        valid_mask = ~np.isnan(slice_values)
+                        if np.any(valid_mask):
+                            # Find indices of valid values
+                            valid_indices = np.where(valid_mask)[0]
                             
-                            interpolated_values_reshaped[:, i] = gaussian_filter(
-                                interpolated_values_reshaped[:, i], 
-                                sigma=sigma
-                            )
+                            # For each NaN, find nearest valid value
+                            for j in range(len(slice_values)):
+                                if np.isnan(slice_values[j]):
+                                    # Find nearest valid index
+                                    nearest_idx = valid_indices[np.argmin(np.abs(valid_indices - j))]
+                                    slice_values[j] = slice_values[nearest_idx]
                         
-                        # Keep the reshaped version (don't flatten back)
-                        interpolated_values = interpolated_values_reshaped
-                    except Exception as e:
-                        logger.warning(f"Gaussian smoothing failed: {str(e)}. Using unsmoothed values.")
-                        # Make sure interpolated_values has the same shape as original_iv
-                        interpolated_values = interpolated_values.reshape(original_iv.shape)
-                    
-                    logger.info(f"Created IV surface for {opt_type} using linear interpolation with adaptive smoothing")
-                
-                # Floor IV at 0.01 to ensure validity
-                interpolated_values = np.where(
-                    np.isnan(interpolated_values) | (interpolated_values <= 0), 
-                    0.01, 
-                    interpolated_values
-                )
-                
-                # Create a combined array that preserves original valid values
-                # Only replace NaN or invalid (≤ 0) values
-                mask = np.isnan(original_iv) | (original_iv <= 0)
-                combined_values = np.where(mask, interpolated_values, original_iv)
-                
-                # Update the dataset with the smooth IV surface
-                self.ds['impliedVolatility'].loc[{'option_type': opt_type}] = combined_values
-                logger.info(f"Created smooth IV surface for {opt_type}")
-            else:
-                logger.warning(f"Not enough valid points for 2D interpolation of impliedVolatility for {opt_type}")
-                # Set a default IV if we can't interpolate
-                mask = np.isnan(da_iv.values) | (da_iv.values <= 0)
-                if mask.any():
-                    default_iv = 0.3  # Default IV of 30%
-                    logger.warning(f"Using default IV of {default_iv} for {np.sum(mask)} points")
-                    self.ds['impliedVolatility'].loc[{'option_type': opt_type}] = np.where(mask, default_iv, da_iv.values)
-
-            # Step 2: Calculate theoretical prices for ALL strikes and DTEs using Black-Scholes
-            # This ensures consistency across all price fields
-            theoretical_prices = np.zeros((len(strikes), len(dtes)))
-            intrinsic_values = np.zeros((len(strikes), len(dtes)))
-            extrinsic_values = np.zeros((len(strikes), len(dtes)))
-            
-            for i, strike in enumerate(strikes):
-                for j, dte in enumerate(dtes):
-                    T = dte / 365.0  # Convert days to years
-                    if T <= 0:
-                        continue
-                    
-                    # Get the IV from our smooth surface
-                    iv = self.ds['impliedVolatility'].sel(strike=strike, DTE=dte, option_type=opt_type).item()
-                    
-                    if pd.isna(iv) or iv <= 0:
-                        logger.warning(f"Invalid IV ({iv}) for strike {strike}, DTE {dte}, {opt_type}. Setting default value.")
-                        iv = 0.3  # Use a reasonable default
-                    
-                    # Calculate theoretical price using Black-Scholes
-                    if opt_type == 'call':
-                        theo_price = call_price(S, strike, T, r, iv)
-                        intrinsic = max(0, S - strike)
-                    else:
-                        theo_price = put_price(S, strike, T, r, iv)
-                        intrinsic = max(0, strike - S)
-                    
-                    # Calculate extrinsic value directly from theoretical price
-                    extrinsic = max(0, theo_price - intrinsic)
-                    
-                    # Store values in arrays
-                    theoretical_prices[i, j] = theo_price
-                    intrinsic_values[i, j] = intrinsic
-                    extrinsic_values[i, j] = extrinsic
-            
-            # Apply additional smoothing to theoretical prices for long-dated options
-            # This helps reduce oscillations in the final prices
-            from scipy.ndimage import gaussian_filter
-            for j, dte in enumerate(dtes):
-                if dte <= 365:  # Apply light smoothing to all options
-                    price_sigma = 0.3
-                elif dte <= 730:  # 1-2 years
-                    price_sigma = 0.8
-                else:  # > 2 years
-                    # Progressive smoothing based on time to expiry
-                    base_sigma = 1.0
-                    additional_sigma = min(2.0, (dte - 730) / 365.0)
-                    price_sigma = base_sigma + additional_sigma
-                
-                # Apply smoothing to prices
-                theoretical_prices[:, j] = gaussian_filter(theoretical_prices[:, j], sigma=price_sigma)
-                
-                # For very long-dated options, apply a second pass
-                if dte > 730:
-                    theoretical_prices[:, j] = gaussian_filter(
-                        theoretical_prices[:, j], 
-                        sigma=price_sigma * 0.5  # Half the sigma for second pass
-                    )
-                
-                # Recalculate extrinsic after smoothing
-                extrinsic_values[:, j] = np.maximum(0, theoretical_prices[:, j] - intrinsic_values[:, j])
-            
-            # Step 3: Calculate average spread per expiration date for bid/ask
-            da_bid = self.ds['bid'].sel(option_type=opt_type)
-            da_ask = self.ds['ask'].sel(option_type=opt_type)
-            valid_mask = (~da_bid.isnull()) & (~da_ask.isnull())
-            
-            if valid_mask.any():
-                spreads = (da_ask - da_bid).where(valid_mask)
-                avg_spread_per_dte = spreads.mean(dim='strike').fillna(0.01).to_pandas()
-            else:
-                # Default spread if no valid bid/ask pairs
-                avg_spread_per_dte = pd.Series(0.01, index=dtes)
-            
-            # Step 4: Update price fields only where values are missing or invalid
-            for i, strike in enumerate(strikes):
-                for j, dte in enumerate(dtes):
-                    theo_price = theoretical_prices[i, j]
-                    intrinsic = intrinsic_values[i, j]
-                    extrinsic = extrinsic_values[i, j]
-                    avg_spread = avg_spread_per_dte.get(dte, 0.01)
-                    
-                    # Only update values that are missing or invalid
-                    bid_val = self.ds['bid'].sel(strike=strike, DTE=dte, option_type=opt_type).item()
-                    ask_val = self.ds['ask'].sel(strike=strike, DTE=dte, option_type=opt_type).item()
-                    mid_val = self.ds['mid_price'].sel(strike=strike, DTE=dte, option_type=opt_type).item()
-                    price_val = self.ds['price'].sel(strike=strike, DTE=dte, option_type=opt_type).item()
-                    extrinsic_val = self.ds['extrinsic_value'].sel(strike=strike, DTE=dte, option_type=opt_type).item()
-                    
-                    # Set bid and ask based on theoretical price and spread
-                    if pd.isna(bid_val):
-                        self.ds['bid'].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = max(0, theo_price - avg_spread / 2)
-                    
-                    if pd.isna(ask_val):
-                        self.ds['ask'].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = theo_price + avg_spread / 2
-                    
-                    # Update mid_price and price if missing
-                    if pd.isna(mid_val):
-                        self.ds['mid_price'].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = theo_price
-                    
-                    if pd.isna(price_val):
-                        self.ds['price'].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = theo_price
-                    
-                    # Update extrinsic value if missing
-                    if pd.isna(extrinsic_val):
-                        self.ds['extrinsic_value'].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = extrinsic
-            
-            logger.info(f"Applied Black-Scholes pricing using IV surface for {opt_type}")
-            
-            # Step 5: Handle non-price fields like volume and openInterest separately
-            for field in non_price_fields:
-                if field in self.ds:
-                    da_field = self.ds[field].sel(option_type=opt_type)
-                    
-                    # For volume and openInterest, we should use nearest neighbor interpolation
-                    # or just set missing values to 0 since they are discrete counts
-                    if da_field.isnull().any():
-                        # Get the values and create a mask for missing values
-                        values = da_field.values
-                        missing_mask = np.isnan(values)
+                        # Apply Gaussian smoothing
+                        smoothed_values = gaussian_filter(slice_values, sigma=sigma)
                         
-                        if missing_mask.any():
-                            # For volume and openInterest, set missing values to 0
-                            # This is more appropriate than interpolation for count data
-                            filled_values = np.where(missing_mask, 0, values)
-                            self.ds[field].loc[{'option_type': opt_type}] = filled_values
-                            logger.info(f"Set missing {field} values to 0 for {opt_type} in 2D interpolation")
+                        # Update the data array
+                        da.values[:, i] = smoothed_values
+                    
+                    # Update the dataset
+                    self.ds[field].loc[{'option_type': opt_type}] = da
             
-            # Step 6: Ensure consistency by recalculating extrinsic value for all points
-            for j, dte in enumerate(dtes):
-                intrinsic = self.ds['intrinsic_value'].sel(option_type=opt_type, DTE=dte)
-                price = self.ds['price'].sel(option_type=opt_type, DTE=dte)
-                extrinsic = price - intrinsic
-                
-                # Apply floor to ensure no negative extrinsic values
-                extrinsic = xr.where(extrinsic < 0, 0, extrinsic)
-                self.ds['extrinsic_value'].loc[{'option_type': opt_type, 'DTE': dte}] = extrinsic
-            
-            logger.info(f"Recalculated extrinsic values for {opt_type} to ensure consistency")
+            logger.info("Smoothing applied successfully")
+        except Exception as e:
+            logger.error(f"Error applying smoothing: {str(e)}")
+            logger.error(traceback.format_exc())
 
     def post_process_data(self):
-        """
-        Post-process the data after interpolation:
-        1. Recalculate intrinsic values based on current price
-        2. Calculate extrinsic value
-        3. Calculate spread (ask - bid)
-        4. Calculate greeks if dimensions are present
-        5. Apply floors and rounding
-        6. Ensure all plot types are calculated and available
-        """
-        logger.info("Post-processing data after interpolation")
-        
+        """Post-process the data after interpolation."""
         try:
-            # Get current price
-            current_price = self.current_price
+            logger.info("Starting post-processing")
             
-            # Recalculate intrinsic values based on current price
+            if self.ds is None:
+                logger.error("No dataset available for post-processing")
+                return None
+            
+            # Calculate intrinsic values based on current price
             # For calls: max(0, S - K)
             # For puts: max(0, K - S)
+            S = self.current_price
             
-            # Create option type masks that match the dataset dimensions
-            call_indices = np.where(np.array(self.ds.option_type.values) == 'call')[0]
-            put_indices = np.where(np.array(self.ds.option_type.values) == 'put')[0]
-            
-            # Calculate intrinsic values for each option type separately
-            if 'intrinsic_value' in self.ds:
-                # For calls
-                if len(call_indices) > 0:
-                    call_data = self.ds.isel(option_type=call_indices)
-                    # Ensure proper broadcasting by explicitly creating the array with correct dimensions
-                    call_intrinsic = np.maximum(0, current_price - call_data.strike.values[:, np.newaxis])
-                    # Ensure the shape matches the expected dimensions
-                    if call_intrinsic.shape != self.ds['intrinsic_value'].sel(option_type='call').shape:
-                        # Reshape to match the expected dimensions
-                        call_intrinsic = np.broadcast_to(
-                            call_intrinsic, 
-                            self.ds['intrinsic_value'].sel(option_type='call').shape
-                        )
-                    self.ds['intrinsic_value'].loc[{'option_type': 'call'}] = call_intrinsic
+            # Process calls
+            if 'call' in self.ds.option_type.values:
+                strikes = self.ds.strike.values
+                intrinsic_calls = np.maximum(0, S - strikes)
                 
-                # For puts
-                if len(put_indices) > 0:
-                    put_data = self.ds.isel(option_type=put_indices)
-                    # Ensure proper broadcasting by explicitly creating the array with correct dimensions
-                    put_intrinsic = np.maximum(0, put_data.strike.values[:, np.newaxis] - current_price)
-                    # Ensure the shape matches the expected dimensions
-                    if put_intrinsic.shape != self.ds['intrinsic_value'].sel(option_type='put').shape:
-                        # Reshape to match the expected dimensions
-                        put_intrinsic = np.broadcast_to(
-                            put_intrinsic, 
-                            self.ds['intrinsic_value'].sel(option_type='put').shape
-                        )
-                    self.ds['intrinsic_value'].loc[{'option_type': 'put'}] = put_intrinsic
+                # Broadcast to match dataset dimensions
+                intrinsic_calls_expanded = np.zeros((len(strikes), len(self.ds.DTE.values)))
+                for i in range(len(self.ds.DTE.values)):
+                    intrinsic_calls_expanded[:, i] = intrinsic_calls
+                
+                # Update intrinsic value for calls
+                self.ds['intrinsic_value'].loc[{'option_type': 'call'}] = intrinsic_calls_expanded
+            
+            # Process puts
+            if 'put' in self.ds.option_type.values:
+                strikes = self.ds.strike.values
+                intrinsic_puts = np.maximum(0, strikes - S)
+                
+                # Broadcast to match dataset dimensions
+                intrinsic_puts_expanded = np.zeros((len(strikes), len(self.ds.DTE.values)))
+                for i in range(len(self.ds.DTE.values)):
+                    intrinsic_puts_expanded[:, i] = intrinsic_puts
+                
+                # Update intrinsic value for puts
+                self.ds['intrinsic_value'].loc[{'option_type': 'put'}] = intrinsic_puts_expanded
             
             # Calculate extrinsic value (price - intrinsic)
-            if 'extrinsic_value' in self.ds and 'price' in self.ds and 'intrinsic_value' in self.ds:
+            if 'price' in self.ds and 'intrinsic_value' in self.ds:
                 self.ds['extrinsic_value'] = self.ds['price'] - self.ds['intrinsic_value']
                 # Ensure extrinsic value is not negative
                 self.ds['extrinsic_value'] = xr.where(self.ds['extrinsic_value'] < 0, 0, self.ds['extrinsic_value'])
@@ -1345,25 +1238,41 @@ class OptionsDataProcessor:
             # Calculate spread (ask - bid)
             if 'ask' in self.ds and 'bid' in self.ds:
                 self.ds['spread'] = self.ds['ask'] - self.ds['bid']
+                logger.info("Calculated spread")
             
-            # Calculate greeks if we have the necessary dimensions
-            if 'strike' in self.ds.dims and 'DTE' in self.ds.dims and 'option_type' in self.ds.dims:
+            # Reverse engineer implied volatility where missing
+            self.reverse_engineer_iv()
+            
+            # Calculate Black-Scholes greeks
+            try:
+                self.calculate_black_scholes_greeks()
+                logger.info("Calculated Black-Scholes greeks")
+            except Exception as e:
+                logger.error(f"Error in Black-Scholes calculation: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                # Fall back to numerical greeks
+                logger.info("Falling back to numerical Greeks calculation")
                 try:
-                    # Calculate greeks using Black-Scholes model
-                    self.calculate_black_scholes_greeks()
-                except Exception as e:
-                    logger.error(f"Error computing Black-Scholes greeks: {str(e)}")
+                    self.compute_all_greeks_numerically()
+                except Exception as e2:
+                    logger.error(f"Error in numerical Greeks calculation: {str(e2)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
                     
-                    # Fallback to numerical greeks
+                    # Try individual numerical calculations as a last resort
+                    logger.info("Trying individual numerical calculations")
                     try:
                         self.compute_delta()
+                    except:
+                        pass
+                    try:
                         self.compute_gamma()
+                    except:
+                        pass
+                    try:
                         self.compute_theta()
-                    except Exception as e:
-                        logger.error(f"Error computing numerical greeks: {str(e)}")
-            else:
-                logger.warning("Cannot calculate greeks: missing required dimensions")
+                    except:
+                        pass
             
             # Ensure all required fields for plotting are available
             self._ensure_all_plot_fields()
@@ -1379,9 +1288,13 @@ class OptionsDataProcessor:
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Continue with what we have
             return self.ds
-            
+
     def _ensure_all_plot_fields(self):
-        """Ensure all fields needed for plotting are available in the dataset."""
+        """Ensure all required plot fields are available in the dataset."""
+        if self.ds is None:
+            logger.error("Cannot ensure plot fields: dataset is None")
+            return
+            
         logger.info("Ensuring all plot fields are available")
         
         # Define all fields needed for plotting
@@ -1413,11 +1326,15 @@ class OptionsDataProcessor:
         logger.info("All plot fields are now available")
 
     def calculate_black_scholes_greeks(self):
-        """Calculate option greeks using Black-Scholes formulas."""
+        """Calculate Black-Scholes greeks for all options in the dataset."""
+        if self.ds is None:
+            logger.error("Cannot calculate Black-Scholes greeks: dataset is None")
+            return
+            
         try:
-            # Get required parameters
-            S = self.current_price  # Current price
-            r = self.get_risk_free_rate()  # Risk-free rate
+            # Get risk-free rate
+            r = self.get_risk_free_rate()
+            S = self.current_price
             
             # Check if we have the necessary dimensions and data
             if 'impliedVolatility' not in self.ds:
@@ -1433,17 +1350,11 @@ class OptionsDataProcessor:
             delta_array = np.zeros((len(strikes), len(dtes), len(option_types)))
             gamma_array = np.zeros((len(strikes), len(dtes), len(option_types)))
             theta_array = np.zeros((len(strikes), len(dtes), len(option_types)))
+            vega_array = np.zeros((len(strikes), len(dtes), len(option_types)))
+            rho_array = np.zeros((len(strikes), len(dtes), len(option_types)))
             
-            # Import the Black-Scholes functions
-            from python.models.black_scholes import delta, gamma, theta
-            
-            # Process each option type separately to avoid indexing issues
+            # Process each option type separately
             for i, opt_type in enumerate(option_types):
-                # Create temporary arrays for this option type
-                opt_delta = np.zeros((len(strikes), len(dtes)))
-                opt_gamma = np.zeros((len(strikes), len(dtes)))
-                opt_theta = np.zeros((len(strikes), len(dtes)))
-                
                 for j, strike in enumerate(strikes):
                     for k, dte in enumerate(dtes):
                         try:
@@ -1456,15 +1367,11 @@ class OptionsDataProcessor:
                             
                             # Skip if implied volatility is invalid
                             if np.isnan(sigma) or sigma <= 0:
-                                # Use a reasonable default for long-dated options
-                                if dte > 365:
-                                    sigma = 0.2  # 20% IV as a reasonable default for LEAPS
-                                else:
-                                    continue
+                                continue
                             
                             # Cap extremely high IVs that can cause numerical issues
-                            if sigma > 2.0:  # Cap at 200%
-                                sigma = 2.0
+                            if sigma > 5.0:  # Cap at 500%
+                                sigma = 5.0
                             
                             # Time to expiration in years
                             T = dte / 365.0
@@ -1477,26 +1384,18 @@ class OptionsDataProcessor:
                             if T > 10.0:
                                 T = 10.0
                             
-                            # Calculate delta
-                            opt_delta[j, k] = delta(S, strike, T, r, sigma, opt_type)
+                            # Calculate all greeks at once for efficiency
+                            greeks = calculate_all_greeks(S, strike, T, r, sigma, opt_type)
                             
-                            # Calculate gamma (same for calls and puts)
-                            opt_gamma[j, k] = gamma(S, strike, T, r, sigma)
+                            # Store the results
+                            delta_array[j, k, i] = greeks['delta']
+                            gamma_array[j, k, i] = greeks['gamma']
+                            theta_array[j, k, i] = greeks['theta']
+                            vega_array[j, k, i] = greeks['vega']
+                            rho_array[j, k, i] = greeks['rho']
                             
-                            # Calculate theta (daily)
-                            # Use a larger divisor for very long-dated options to avoid numerical issues
-                            divisor = 365.0
-                            if dte > 730:  # For options > 2 years
-                                divisor = 365.0 * (1 + (dte - 730) / 3650)  # Gradually increase divisor
-                            
-                            opt_theta[j, k] = theta(S, strike, T, r, sigma, opt_type) / divisor
                         except Exception as e:
                             logger.debug(f"Error calculating greeks for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
-                
-                # Assign the calculated values to the main arrays
-                delta_array[:, :, i] = opt_delta
-                gamma_array[:, :, i] = opt_gamma
-                theta_array[:, :, i] = opt_theta
             
             # Add or update the greeks in the dataset
             if 'delta' not in self.ds:
@@ -1513,101 +1412,241 @@ class OptionsDataProcessor:
                 self.ds['theta'] = (('strike', 'DTE', 'option_type'), theta_array)
             else:
                 self.ds['theta'].values = theta_array
-            
-            # Apply additional smoothing to delta and theta for long-dated options
-            # This helps reduce oscillations in the greeks
-            from scipy.ndimage import gaussian_filter
-            
-            for i, opt_type in enumerate(option_types):
-                for k, dte in enumerate(dtes):
-                    if dte > 365:  # Only apply to LEAPS
-                        # Adaptive sigma based on time to expiry
-                        greek_sigma = 0.5 + min(2.0, (dte / 730.0))
-                        
-                        # Apply smoothing to delta
-                        delta_array[:, k, i] = gaussian_filter(delta_array[:, k, i], sigma=greek_sigma)
-                        
-                        # Apply smoothing to theta
-                        theta_array[:, k, i] = gaussian_filter(theta_array[:, k, i], sigma=greek_sigma)
-                        
-                        # Apply smoothing to gamma
-                        gamma_array[:, k, i] = gaussian_filter(gamma_array[:, k, i], sigma=greek_sigma)
-            
-            # Update the dataset with smoothed values
-            self.ds['delta'].values = delta_array
-            self.ds['gamma'].values = gamma_array
-            self.ds['theta'].values = theta_array
+                
+            if 'vega' not in self.ds:
+                self.ds['vega'] = (('strike', 'DTE', 'option_type'), vega_array)
+            else:
+                self.ds['vega'].values = vega_array
+                
+            if 'rho' not in self.ds:
+                self.ds['rho'] = (('strike', 'DTE', 'option_type'), rho_array)
+            else:
+                self.ds['rho'].values = rho_array
             
             logger.info("Successfully calculated Black-Scholes greeks")
+            
         except Exception as e:
-            logger.error(f"Error in calculate_black_scholes_greeks: {str(e)}")
+            logger.error(f"Error calculating Black-Scholes greeks: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Try the non-parallel version as a fallback
+            try:
+                self._calculate_black_scholes_greeks_sequential()
+            except Exception as e2:
+                logger.error(f"Error in sequential Black-Scholes calculation: {str(e2)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def _calculate_black_scholes_greeks_sequential(self):
+        """Calculate Black-Scholes greeks sequentially (fallback method)."""
+        if self.ds is None:
+            logger.error("Cannot calculate Black-Scholes greeks: dataset is None")
+            return
+            
+        try:
+            # Get risk-free rate
+            r = self.get_risk_free_rate()
+            S = self.current_price
+            
+            # Import the Black-Scholes functions
+            from python.models.black_scholes import (
+                delta, gamma, theta, vega, rho
+            )
+            
+            # Process calls
+            if 'call' in self.ds.option_type.values:
+                for strike in self.ds.strike.values:
+                    for dte in self.ds.DTE.values:
+                        try:
+                            # Get implied volatility
+                            sigma = self.ds['impliedVolatility'].sel(
+                                strike=strike, 
+                                DTE=dte, 
+                                option_type='call'
+                            ).item()
+                            
+                            # Skip if invalid
+                            if np.isnan(sigma) or sigma <= 0:
+                                continue
+                                
+                            # Cap extremely high IVs
+                            if sigma > 5.0:
+                                sigma = 5.0
+                                
+                            # Time to expiration in years
+                            T = dte / 365.0
+                            
+                            # Skip if too small
+                            if T <= 0.001:
+                                continue
+                                
+                            # Calculate greeks
+                            delta_val = delta(S, strike, T, r, sigma, 'call')
+                            gamma_val = gamma(S, strike, T, r, sigma)
+                            theta_val = theta(S, strike, T, r, sigma, 'call')
+                            vega_val = vega(S, strike, T, r, sigma)
+                            rho_val = rho(S, strike, T, r, sigma, 'call')
+                            
+                            # Update dataset
+                            self.ds['delta'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'call'}] = delta_val
+                            self.ds['gamma'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'call'}] = gamma_val
+                            self.ds['theta'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'call'}] = theta_val
+                            self.ds['vega'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'call'}] = vega_val
+                            self.ds['rho'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'call'}] = rho_val
+                        except Exception as e:
+                            logger.debug(f"Error in sequential calculation for call, strike={strike}, DTE={dte}: {str(e)}")
+            
+            # Process puts
+            if 'put' in self.ds.option_type.values:
+                for strike in self.ds.strike.values:
+                    for dte in self.ds.DTE.values:
+                        try:
+                            # Get implied volatility
+                            sigma = self.ds['impliedVolatility'].sel(
+                                strike=strike, 
+                                DTE=dte, 
+                                option_type='put'
+                            ).item()
+                            
+                            # Skip if invalid
+                            if np.isnan(sigma) or sigma <= 0:
+                                continue
+                                
+                            # Cap extremely high IVs
+                            if sigma > 5.0:
+                                sigma = 5.0
+                                
+                            # Time to expiration in years
+                            T = dte / 365.0
+                            
+                            # Skip if too small
+                            if T <= 0.001:
+                                continue
+                                
+                            # Calculate greeks
+                            delta_val = delta(S, strike, T, r, sigma, 'put')
+                            gamma_val = gamma(S, strike, T, r, sigma)
+                            theta_val = theta(S, strike, T, r, sigma, 'put')
+                            vega_val = vega(S, strike, T, r, sigma)
+                            rho_val = rho(S, strike, T, r, sigma, 'put')
+                            
+                            # Update dataset
+                            self.ds['delta'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'put'}] = delta_val
+                            self.ds['gamma'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'put'}] = gamma_val
+                            self.ds['theta'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'put'}] = theta_val
+                            self.ds['vega'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'put'}] = vega_val
+                            self.ds['rho'].loc[{'strike': strike, 'DTE': dte, 'option_type': 'put'}] = rho_val
+                        except Exception as e:
+                            logger.debug(f"Error in sequential calculation for put, strike={strike}, DTE={dte}: {str(e)}")
+            
+            logger.info("Successfully calculated Black-Scholes greeks sequentially")
+            
+        except Exception as e:
+            logger.error(f"Error in sequential Black-Scholes calculation: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
 
-    def compute_delta(self):
-        """Compute delta (first derivative of price with respect to strike)."""
-        try:
-            # Check if we have at least 2 strike values
-            if len(self.ds.strike) < 2:
-                logger.warning("Cannot compute delta: need at least 2 strike values")
-                return
-                
-            delta = np.gradient(self.ds['price'].values, self.ds.strike.values, axis=0)
-            self.ds['delta'] = (('strike', 'DTE', 'option_type'), delta)
-        except Exception as e:
-            logger.error(f"Error computing delta: {str(e)}")
-
-    def compute_gamma(self):
-        """Compute gamma (second derivative of price with respect to strike)."""
-        try:
-            # Check if delta exists and we have at least 2 strike values
-            if 'delta' not in self.ds or len(self.ds.strike) < 2:
-                logger.warning("Cannot compute gamma: need delta and at least 2 strike values")
-                return
-                
-            gamma = np.gradient(self.ds['delta'].values, self.ds.strike.values, axis=0)
-            self.ds['gamma'] = (('strike', 'DTE', 'option_type'), gamma)
-        except Exception as e:
-            logger.error(f"Error computing gamma: {str(e)}")
-
-    def compute_theta(self):
-        """Compute theta (derivative of price with respect to time)."""
-        try:
-            # Check if we have at least 2 DTE values
-            if len(self.ds.DTE) < 2:
-                logger.warning("Cannot compute theta: need at least 2 DTE values")
-                return
-                
-            theta = -np.gradient(self.ds['price'].values, self.ds.DTE.values, axis=1)
-            self.ds['theta'] = (('strike', 'DTE', 'option_type'), theta)
-        except Exception as e:
-            logger.error(f"Error computing theta: {str(e)}")
-
     def apply_floors(self):
-        """
-        Apply floors and rounding to ensure reasonable values after interpolation:
-        1. Apply a floor of zero to all numeric values
-        2. Round all dollar-denominated fields to the nearest $0.05
-        3. Apply specific constraints to greeks and other fields
-        """
-        logger.info("Applying floors and rounding to ensure reasonable values after interpolation")
+        """Apply minimum floors to certain fields to avoid negative or zero values.
+        Note: This method has been modified to pass through true values without applying floors/ceilings."""
+        if self.ds is None:
+            logger.error("Cannot apply floors: dataset is None")
+            return
+            
+        logger.info("Applying minimal processing to preserve true values")
         
         # Define dollar-denominated fields that need rounding to nearest $0.05
         dollar_fields = ['bid', 'ask', 'mid_price', 'price', 'intrinsic_value', 'extrinsic_value', 'spread']
         
-        # Apply floor of zero to all numeric fields
-        for field in self.ds.data_vars:
-            if np.issubdtype(self.ds[field].dtype, np.number) and field != 'impliedVolatility':
-                # Apply floor of zero
-                self.ds[field] = xr.where(self.ds[field] < 0, 0, self.ds[field])
-                
-                # Round dollar-denominated fields to nearest $0.05
-                if field in dollar_fields:
-                    # Round to nearest $0.05 (multiply by 20, round, divide by 20)
-                    self.ds[field] = (self.ds[field] * 20).round() / 20
-                    logger.debug(f"Applied zero floor and $0.05 rounding to {field}")
+        # Round dollar-denominated fields to nearest $0.05
+        for field in dollar_fields:
+            if field in self.ds.data_vars:
+                # Round to nearest $0.05 (multiply by 20, round, divide by 20)
+                self.ds[field] = (self.ds[field] * 20).round() / 20
+                logger.debug(f"Applied $0.05 rounding to {field}")
         
-        # Special handling for implied volatility - floor at 0.01 and cap at 5.0
-        iv_mask_low = (self.ds['impliedVolatility'].isnull() | (self.ds['impliedVolatility'] < 0.01))
+        # Ensure ask >= bid (this is a logical constraint, not a floor)
+        if 'ask' in self.ds.data_vars and 'bid' in self.ds.data_vars:
+            ask_lt_bid_mask = self.ds['ask'] < self.ds['bid']
+            if ask_lt_bid_mask.any():
+                logger.warning(f"Found {ask_lt_bid_mask.sum().item()} cases where ask < bid, fixing...")
+                self.ds['ask'] = xr.where(ask_lt_bid_mask, self.ds['bid'] * 1.05, self.ds['ask'])
+                # Re-round ask prices after adjustment
+                self.ds['ask'] = (self.ds['ask'] * 20).round() / 20
+            
+            # Recalculate mid_price after rounding
+            self.ds['mid_price'] = (self.ds['bid'] + self.ds['ask']) / 2
+            # Re-round mid_price
+            self.ds['mid_price'] = (self.ds['mid_price'] * 20).round() / 20
+        
+        logger.info("Applied minimal processing to preserve true values")
+
+    def reverse_engineer_iv(self):
+        """
+        Reverse engineer implied volatility from market prices.
+        This is useful when IV data is missing but price data is available.
+        """
+        if self.ds is None:
+            logger.error("Cannot reverse engineer IV: dataset is None")
+            return
+            
+        logger.info("Reverse engineering implied volatility from market prices")
+        
+        # Import the implied_volatility function
+        from python.models.black_scholes import implied_volatility
+        
+        # Get current price and risk-free rate
+        S = self.current_price
+        r = self.get_risk_free_rate()
+        
+        # Process each option type separately
+        for opt_type in self.ds.option_type.values:
+            # Get price data for this option type
+            price_data = self.ds['price'].sel(option_type=opt_type)
+            
+            # Get IV data for this option type
+            iv_data = self.ds['impliedVolatility'].sel(option_type=opt_type)
+            
+            # Find missing IV values where price is available
+            missing_mask = iv_data.isnull() | (iv_data <= 0)
+            price_available = ~price_data.isnull() & (price_data > 0)
+            
+            # Only process points where IV is missing but price is available
+            process_mask = missing_mask & price_available
+            
+            if process_mask.any():
+                logger.info(f"Calculating IV for {process_mask.sum().item()} {opt_type} options with missing IV")
+                
+                # Process each point
+                for i, strike in enumerate(self.ds.strike.values):
+                    for j, dte in enumerate(self.ds.DTE.values):
+                        # Check if this point needs processing
+                        if process_mask.isel(strike=i, DTE=j).item():
+                            try:
+                                # Get market price
+                                market_price = price_data.isel(strike=i, DTE=j).item()
+                                
+                                # Calculate time to expiration in years
+                                T = dte / 365.0
+                                
+                                # Skip if time to expiration is too small
+                                if T <= 0.001:
+                                    continue
+                                
+                                # Calculate implied volatility
+                                iv = implied_volatility(market_price, S, strike, T, r, opt_type)
+                                
+                                # Update the dataset if IV calculation was successful
+                                if not np.isnan(iv) and iv > 0:
+                                    self.ds['impliedVolatility'].loc[{'option_type': opt_type, 'strike': strike, 'DTE': dte}] = iv
+                                    logger.debug(f"Calculated IV={iv:.2f} for {opt_type}, strike={strike}, DTE={dte}")
+                            except Exception as e:
+                                logger.debug(f"Error calculating IV for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+                
+                logger.info(f"Completed IV calculation for {opt_type} options")
+            else:
+                logger.info(f"No missing IV values to calculate for {opt_type} options")
+        
+        # Apply bounds to IV values
+        iv_mask_low = (self.ds['impliedVolatility'] < 0.01)
         iv_mask_high = (self.ds['impliedVolatility'] > 5.0)
         
         if iv_mask_low.any():
@@ -1618,66 +1657,7 @@ class OptionsDataProcessor:
             logger.info(f"Capping {iv_mask_high.sum().item()} high implied volatility values")
             self.ds['impliedVolatility'] = xr.where(iv_mask_high, 5.0, self.ds['impliedVolatility'])
         
-        # Ensure ask >= bid
-        ask_lt_bid_mask = self.ds['ask'] < self.ds['bid']
-        if ask_lt_bid_mask.any():
-            logger.warning(f"Found {ask_lt_bid_mask.sum().item()} cases where ask < bid, fixing...")
-            self.ds['ask'] = xr.where(ask_lt_bid_mask, self.ds['bid'] * 1.05, self.ds['ask'])
-            # Re-round ask prices after adjustment
-            self.ds['ask'] = (self.ds['ask'] * 20).round() / 20
-        
-        # Recalculate mid_price after floor and rounding
-        self.ds['mid_price'] = (self.ds['bid'] + self.ds['ask']) / 2
-        # Re-round mid_price
-        self.ds['mid_price'] = (self.ds['mid_price'] * 20).round() / 20
-        self.ds['price'] = self.ds['mid_price']
-        
-        # Calculate or update spread (ask - bid)
-        self.ds['spread'] = self.ds['ask'] - self.ds['bid']
-        # Round spread to nearest $0.05
-        self.ds['spread'] = (self.ds['spread'] * 20).round() / 20
-        
-        # Special handling for greeks if they exist
-        if 'delta' in self.ds:
-            # Delta should be between -1 and 1
-            delta_low_mask = self.ds['delta'] < -1
-            delta_high_mask = self.ds['delta'] > 1
-            
-            if delta_low_mask.any() or delta_high_mask.any():
-                logger.info(f"Constraining delta values to [-1, 1]")
-                self.ds['delta'] = xr.where(delta_low_mask, -1, self.ds['delta'])
-                self.ds['delta'] = xr.where(delta_high_mask, 1, self.ds['delta'])
-        
-        if 'gamma' in self.ds:
-            # Gamma should be positive and reasonably bounded
-            gamma_neg_mask = self.ds['gamma'] < 0
-            gamma_high_mask = self.ds['gamma'] > 1
-            
-            if gamma_neg_mask.any():
-                logger.info(f"Flooring {gamma_neg_mask.sum().item()} negative gamma values")
-                self.ds['gamma'] = xr.where(gamma_neg_mask, 0, self.ds['gamma'])
-                
-            if gamma_high_mask.any():
-                logger.info(f"Capping {gamma_high_mask.sum().item()} high gamma values")
-                self.ds['gamma'] = xr.where(gamma_high_mask, 1, self.ds['gamma'])
-        
-        if 'theta' in self.ds:
-            # Theta should be reasonably bounded
-            theta_low_mask = self.ds['theta'] < -10
-            theta_high_mask = self.ds['theta'] > 10
-            
-            if theta_low_mask.any() or theta_high_mask.any():
-                logger.info(f"Constraining theta values to [-10, 10]")
-                self.ds['theta'] = xr.where(theta_low_mask, -10, self.ds['theta'])
-                self.ds['theta'] = xr.where(theta_high_mask, 10, self.ds['theta'])
-        
-        # Recalculate extrinsic value after all other adjustments
-        self.ds['extrinsic_value'] = self.ds['price'] - self.ds['intrinsic_value']
-        self.ds['extrinsic_value'] = xr.where(self.ds['extrinsic_value'] < 0, 0, self.ds['extrinsic_value'])
-        # Re-round extrinsic value
-        self.ds['extrinsic_value'] = (self.ds['extrinsic_value'] * 20).round() / 20
-        
-        logger.info("Floor application and rounding complete")
+        logger.info("Completed reverse engineering of implied volatility")
 
     def get_data(self):
         return self.ds if self.ds is not None else logger.error("No processed data available")
@@ -1703,7 +1683,28 @@ class OptionsDataProcessor:
         return self.ds.sel(DTE=closest_dte).to_dataframe().reset_index().dropna(subset=['price'])
 
     def get_risk_free_rate(self):
-        return YahooFinanceAPI().get_risk_free_rate("^TNX")
+        """Get the risk-free rate for option pricing."""
+        # Check if we already have a risk-free rate
+        if hasattr(self, 'risk_free_rate') and self.risk_free_rate is not None:
+            return self.risk_free_rate
+            
+        # Default risk-free rate if we can't get it from the API
+        default_rate = 0.04  # 4%
+        
+        try:
+            # Try to get from YahooFinanceAPI
+            api = YahooFinanceAPI()
+            rate = api.get_risk_free_rate()
+            logger.info(f"Got risk-free rate from API: {rate:.2%}")
+            # Set the instance attribute
+            self.risk_free_rate = rate
+            return rate
+        except Exception as e:
+            logger.error(f"Error getting risk-free rate: {str(e)}")
+            logger.info(f"Using default risk-free rate: {default_rate:.2%}")
+            # Set the instance attribute to the default value
+            self.risk_free_rate = default_rate
+            return default_rate
 
     def force_reinterpolate(self):
         """Force a complete reinterpolation of all values, regardless of current state.
@@ -1716,29 +1717,35 @@ class OptionsDataProcessor:
             return False
             
         try:
-            # Get number of expiration dates
-            num_dates = len(self.get_expirations())
-            logger.info(f"Found {num_dates} expiration dates")
+            # Convert all zeros to NaN for proper interpolation
+            logger.info("Converting zeros to NaN for proper interpolation")
             
-            # Only perform 2D interpolation if we have multiple dates
-            if num_dates >= 2:
-                logger.info("Performing 2D interpolation across all dates")
-                self.interpolate_missing_values_2d()
-                
-                # Check if we still have missing values
-                missing_count = self.count_missing_values()
-                logger.info(f"After 2D interpolation: {missing_count} missing values")
-                
-                # If we still have missing values, use default values instead of 1D interpolation
-                if missing_count > 0:
-                    logger.info("Setting default values for any remaining missing data")
-                    self._set_default_values_for_missing()
-            else:
-                logger.warning("Need at least 2 expiration dates for 2D interpolation")
-                # For single date, we'll use default values instead of 1D interpolation
-                logger.info("Setting default values for single date")
+            # Define fields to process
+            price_fields = ['bid', 'ask', 'mid_price', 'price', 'lastPrice', 'intrinsic_value', 'extrinsic_value']
+            # Define non-price fields that need special handling
+            non_price_fields = ['impliedVolatility']
+            
+            # Process all fields except volume and openInterest
+            all_fields = price_fields + non_price_fields
+            
+            for field in all_fields:
+                if field in self.ds:
+                    # Convert zeros to NaN for proper interpolation
+                    self.ds[field] = self.ds[field].where(self.ds[field] != 0)
+            
+            # Perform 2D interpolation
+            logger.info("Performing 2D interpolation")
+            self.interpolate_missing_values_2d()
+            
+            # Check if we still have missing values
+            missing_count = self.count_missing_values()
+            logger.info(f"After 2D interpolation: {missing_count} missing values")
+            
+            # If we still have missing values, set default values
+            if missing_count > 0:
+                logger.info("Setting default values for any remaining missing data")
                 self._set_default_values_for_missing()
-                
+            
             # Apply floors to ensure all values are reasonable
             self.apply_floors()
             
@@ -1799,3 +1806,242 @@ class OptionsDataProcessor:
                 count += self.ds[field].isnull().sum().item()
                 
         return count
+
+    def compute_delta(self):
+        """Compute delta (first derivative of price with respect to strike) numerically."""
+        try:
+            # Check if we have at least 2 strike values
+            if len(self.ds.strike) < 2:
+                logger.warning("Cannot compute delta: need at least 2 strike values")
+                return
+                
+            # Compute gradient for each option type separately
+            for opt_type in self.ds.option_type.values:
+                # Get price data for this option type
+                price_data = self.ds['price'].sel(option_type=opt_type)
+                
+                # Compute gradient along strike dimension
+                delta_values = np.gradient(price_data.values, self.ds.strike.values, axis=0)
+                
+                # Update the dataset
+                self.ds['delta'].loc[{'option_type': opt_type}] = delta_values
+                
+            logger.info("Computed delta numerically")
+        except Exception as e:
+            logger.error(f"Error computing delta: {str(e)}")
+
+    def compute_gamma(self):
+        """Compute gamma (second derivative of price with respect to strike) numerically."""
+        try:
+            # Check if delta exists and we have at least 2 strike values
+            if 'delta' not in self.ds or len(self.ds.strike) < 2:
+                logger.warning("Cannot compute gamma: need delta and at least 2 strike values")
+                return
+                
+            # Compute gradient for each option type separately
+            for opt_type in self.ds.option_type.values:
+                # Get delta data for this option type
+                delta_data = self.ds['delta'].sel(option_type=opt_type)
+                
+                # Compute gradient along strike dimension
+                gamma_values = np.gradient(delta_data.values, self.ds.strike.values, axis=0)
+                
+                # Update the dataset
+                self.ds['gamma'].loc[{'option_type': opt_type}] = gamma_values
+                
+            logger.info("Computed gamma numerically")
+        except Exception as e:
+            logger.error(f"Error computing gamma: {str(e)}")
+
+    def compute_theta(self):
+        """Compute theta (derivative of price with respect to time) numerically."""
+        try:
+            # Check if we have at least 2 DTE values
+            if len(self.ds.DTE) < 2:
+                logger.warning("Cannot compute theta: need at least 2 DTE values")
+                return
+                
+            # Compute gradient for each option type separately
+            for opt_type in self.ds.option_type.values:
+                # Get price data for this option type
+                price_data = self.ds['price'].sel(option_type=opt_type)
+                
+                # Compute negative gradient along DTE dimension (negative because theta is time decay)
+                theta_values = -np.gradient(price_data.values, self.ds.DTE.values, axis=1)
+                
+                # Update the dataset
+                self.ds['theta'].loc[{'option_type': opt_type}] = theta_values
+                
+            logger.info("Computed theta numerically")
+        except Exception as e:
+            logger.error(f"Error computing theta: {str(e)}")
+
+    def compute_vega(self):
+        """
+        Compute vega (derivative of price with respect to volatility) numerically.
+        This is an approximation using the Black-Scholes model with small IV perturbations.
+        """
+        if self.ds is None or 'impliedVolatility' not in self.ds:
+            logger.error("Cannot compute vega: dataset or implied volatility is missing")
+            return
+            
+        try:
+            # Import Black-Scholes functions
+            from python.models.black_scholes import call_price, put_price
+            
+            # Get current price and risk-free rate
+            S = self.current_price
+            r = self.get_risk_free_rate()
+            
+            # Create array to store vega values
+            vega_array = np.zeros((len(self.ds.strike), len(self.ds.DTE), len(self.ds.option_type)))
+            
+            # Small volatility perturbation (0.01 = 1%)
+            dv = 0.01
+            
+            # Process each option type separately
+            for i, opt_type in enumerate(self.ds.option_type.values):
+                for j, strike in enumerate(self.ds.strike.values):
+                    for k, dte in enumerate(self.ds.DTE.values):
+                        try:
+                            # Get implied volatility
+                            sigma = self.ds['impliedVolatility'].sel(
+                                strike=strike, 
+                                DTE=dte, 
+                                option_type=opt_type
+                            ).item()
+                            
+                            # Skip if invalid
+                            if np.isnan(sigma) or sigma <= 0:
+                                continue
+                                
+                            # Time to expiration in years
+                            T = dte / 365.0
+                            
+                            # Skip if too small
+                            if T <= 0.001:
+                                continue
+                                
+                            # Calculate price with current IV
+                            if opt_type == 'call':
+                                price1 = call_price(S, strike, T, r, sigma)
+                                # Calculate price with perturbed IV
+                                price2 = call_price(S, strike, T, r, sigma + dv)
+                            else:
+                                price1 = put_price(S, strike, T, r, sigma)
+                                # Calculate price with perturbed IV
+                                price2 = put_price(S, strike, T, r, sigma + dv)
+                                
+                            # Calculate vega as price difference divided by volatility difference
+                            vega_val = (price2 - price1) / dv
+                            
+                            # Store vega value
+                            vega_array[j, k, i] = vega_val
+                            
+                        except Exception as e:
+                            logger.debug(f"Error computing vega for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+            
+            # Add or update vega in the dataset
+            if 'vega' not in self.ds:
+                self.ds['vega'] = (('strike', 'DTE', 'option_type'), vega_array)
+            else:
+                self.ds['vega'].values = vega_array
+                
+            logger.info("Computed vega numerically")
+            
+        except Exception as e:
+            logger.error(f"Error computing vega: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def compute_rho(self):
+        """
+        Compute rho (derivative of price with respect to interest rate) numerically.
+        This is an approximation using the Black-Scholes model with small interest rate perturbations.
+        """
+        if self.ds is None or 'impliedVolatility' not in self.ds:
+            logger.error("Cannot compute rho: dataset or implied volatility is missing")
+            return
+            
+        try:
+            # Import Black-Scholes functions
+            from python.models.black_scholes import call_price, put_price
+            
+            # Get current price and risk-free rate
+            S = self.current_price
+            r = self.get_risk_free_rate()
+            
+            # Create array to store rho values
+            rho_array = np.zeros((len(self.ds.strike), len(self.ds.DTE), len(self.ds.option_type)))
+            
+            # Small interest rate perturbation (0.01 = 1%)
+            dr = 0.01
+            
+            # Process each option type separately
+            for i, opt_type in enumerate(self.ds.option_type.values):
+                for j, strike in enumerate(self.ds.strike.values):
+                    for k, dte in enumerate(self.ds.DTE.values):
+                        try:
+                            # Get implied volatility
+                            sigma = self.ds['impliedVolatility'].sel(
+                                strike=strike, 
+                                DTE=dte, 
+                                option_type=opt_type
+                            ).item()
+                            
+                            # Skip if invalid
+                            if np.isnan(sigma) or sigma <= 0:
+                                continue
+                                
+                            # Time to expiration in years
+                            T = dte / 365.0
+                            
+                            # Skip if too small
+                            if T <= 0.001:
+                                continue
+                                
+                            # Calculate price with current interest rate
+                            if opt_type == 'call':
+                                price1 = call_price(S, strike, T, r, sigma)
+                                # Calculate price with perturbed interest rate
+                                price2 = call_price(S, strike, T, r + dr, sigma)
+                            else:
+                                price1 = put_price(S, strike, T, r, sigma)
+                                # Calculate price with perturbed interest rate
+                                price2 = put_price(S, strike, T, r + dr, sigma)
+                                
+                            # Calculate rho as price difference divided by interest rate difference
+                            rho_val = (price2 - price1) / dr
+                            
+                            # Store rho value
+                            rho_array[j, k, i] = rho_val
+                            
+                        except Exception as e:
+                            logger.debug(f"Error computing rho for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+            
+            # Add or update rho in the dataset
+            if 'rho' not in self.ds:
+                self.ds['rho'] = (('strike', 'DTE', 'option_type'), rho_array)
+            else:
+                self.ds['rho'].values = rho_array
+                
+            logger.info("Computed rho numerically")
+            
+        except Exception as e:
+            logger.error(f"Error computing rho: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def compute_all_greeks_numerically(self):
+        """Compute all Greeks numerically as a fallback method."""
+        logger.info("Computing all Greeks numerically")
+        
+        # Ensure required fields exist
+        self._ensure_all_plot_fields()
+        
+        # Compute Greeks
+        self.compute_delta()
+        self.compute_gamma()
+        self.compute_theta()
+        self.compute_vega()
+        self.compute_rho()
+        
+        logger.info("Completed numerical computation of all Greeks")

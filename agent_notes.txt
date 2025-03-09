@@ -126,3 +126,123 @@ The following fields have been implemented and are now available for visualizati
 - Implement additional interpolation methods for smoother curves
 - Add ability to compare multiple expiration dates on the same plot
 - Implement volatility surface visualization
+
+# Race Condition Fixes in Options Visualizer
+
+## Issues Identified
+1. Race conditions in data fetching (`_fetch_options_data`) causing "Cannot ensure plot fields: dataset is None" errors
+2. Missing `risk_free_rate` attribute in the `OptionsDataProcessor` class
+3. Concurrent access to the SQLite cache causing "no such column: timestamp" errors
+
+## Solutions Implemented
+
+### 1. Added Per-Ticker Locks in Cache Manager
+- Added a `ticker_locks` dictionary to the `OptionsCache` class to store per-ticker locks
+- Implemented a `get_lock(ticker)` method to get or create a lock for a specific ticker
+- Modified `get()`, `set()`, `clear()`, and `delete()` methods to use ticker-specific locks
+
+### 2. Fixed Race Conditions in Options Data Manager
+- Modified `_fetch_in_background` method to use ticker-specific locks
+- Added proper lock acquisition around critical sections:
+  - API data fetching
+  - Data processing
+  - Cache updates
+- Added checks for None dataset before accessing attributes
+- Wrapped cache access with appropriate locks
+
+### 3. Fixed OptionsDataProcessor Issues
+- Properly initialized `risk_free_rate` attribute in the constructor
+- Added null checks before accessing dataset attributes
+- Improved error handling in methods that access the dataset
+- Enhanced the `get_risk_free_rate()` method to handle errors gracefully
+
+### 4. General Improvements
+- Added better error handling throughout the code
+- Added more detailed logging to help diagnose issues
+- Improved thread safety in all critical sections
+- Added checks to prevent accessing attributes of None objects
+
+These changes should prevent the race conditions and errors seen in the logs, making the application more stable and reliable.
+
+# Interpolation Method Improvements
+
+## Changes Made to Interpolation Methods
+
+### 1. Removed 1D Interpolation Fallback
+- Eliminated the 1D interpolation fallback for single expiration dates
+- Now using 2D interpolation exclusively for all cases
+- This provides more consistent results across different datasets
+
+### 2. Updated 2D Interpolation Method
+- Now using xarray's built-in `interpolate_na` method for primary interpolation
+- First converting zero values to NaN for proper interpolation
+- Interpolating along strike dimension first, then along DTE dimension
+- Using scipy's `griddata` for any remaining NaN values after xarray interpolation
+
+### 3. Improved Smoothing Process
+- Separated smoothing into its own method `_apply_smoothing`
+- Applied adaptive smoothing based on days to expiration (DTE)
+- Handling NaN values properly during smoothing by replacing with nearest valid values
+- Applying smoothing only to fields that benefit from it (price fields and implied volatility)
+
+### 4. Enhanced Zero Value Handling
+- Now explicitly converting zeros to NaN for fields where zero is not a valid value
+- Preserving zeros for fields like volume and openInterest where zero is meaningful
+- This ensures more accurate interpolation results
+
+### 5. Better Error Handling
+- Added more robust error handling throughout the interpolation process
+- Improved logging to better track the interpolation progress and identify issues
+- Added checks to prevent operations on None datasets
+
+These changes should result in smoother, more accurate interpolation of options data, especially for sparse datasets with many missing values.
+
+# Black-Scholes and Options Data Processing Improvements
+
+## Enhanced Black-Scholes Module
+
+### 1. Improved Implied Volatility Calculation
+- Implemented a robust multi-method approach for calculating implied volatility
+- Added fallback methods when Newton-Raphson fails (bisection and heuristic approaches)
+- Added comprehensive edge case handling for all parameters
+- Improved numerical stability for extreme cases (very long-dated options, deep ITM/OTM)
+
+### 2. Enhanced Greeks Calculation
+- Added proper error handling and edge case management for all Greeks
+- Normalized Vega and Rho to represent 1% changes in volatility and interest rate
+- Added a unified `calculate_all_greeks` function for efficient calculation
+- Added support for calculating IV surfaces from market prices
+
+### 3. Better Documentation and Type Handling
+- Added comprehensive docstrings with parameter and return value descriptions
+- Added proper error handling for invalid inputs
+- Improved numerical stability with appropriate bounds and floors
+
+## Improved Options Data Processing
+
+### 1. Reverse Engineering of Implied Volatility
+- Added a new `reverse_engineer_iv` method to calculate IV from market prices
+- This fills in missing IV values where price data is available
+- Improves data quality for interpolation and visualization
+
+### 2. Enhanced Black-Scholes Greeks Calculation
+- Implemented a more efficient calculation using the enhanced Black-Scholes module
+- Added proper error handling and fallback methods
+- Added sequential calculation as a fallback for parallel processing failures
+
+### 3. Numerical Greeks Calculation
+- Added methods to calculate Greeks numerically as fallbacks
+- Implemented numerical approximations for Vega and Rho using finite differences
+- Added a unified `compute_all_greeks_numerically` method
+
+### 4. Improved Bounds and Floors
+- Enhanced the `apply_floors` method with proper bounds for all Greeks
+- Added option-type-specific constraints (e.g., call delta between 0 and 1)
+- Improved handling of edge cases and invalid values
+
+### 5. Better Post-Processing
+- Improved intrinsic and extrinsic value calculations
+- Added multiple fallback methods for Greeks calculation
+- Enhanced error handling throughout the processing pipeline
+
+These improvements make the options data processing more robust, accurate, and efficient, especially for edge cases and sparse datasets.

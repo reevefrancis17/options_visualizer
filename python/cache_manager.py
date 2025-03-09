@@ -28,6 +28,7 @@ class OptionsCache:
         self.compression_level = compression_level
         self.db_path = self._get_cache_path()
         self.lock = threading.RLock()  # Reentrant lock for thread safety
+        self.ticker_locks = {}  # Per-ticker locks for thread safety
         self._initialize_db()
         self._migrate_db_if_needed()  # Add migration step
         self.cached_tickers = set()
@@ -223,7 +224,8 @@ class OptionsCache:
             where timestamp is a float representing the Unix timestamp when the data was cached
         """
         try:
-            with self.lock:
+            # Use the ticker-specific lock for thread safety
+            with self.get_lock(ticker):
                 # Connect to the database
                 conn = sqlite3.connect(str(self.db_path))
                 cursor = conn.cursor()
@@ -316,7 +318,8 @@ class OptionsCache:
             total_dates: Total number of expiration dates
         """
         try:
-            with self.lock:
+            # Use the ticker-specific lock for thread safety
+            with self.get_lock(ticker):
                 # Connect to the database
                 conn = sqlite3.connect(str(self.db_path))
                 cursor = conn.cursor()
@@ -357,7 +360,7 @@ class OptionsCache:
                 # Log the size of the data for monitoring
                 data_size_kb = len(data_blob) / 1024
                 logger.info(f"Cached data for {ticker} ({processed_dates}/{total_dates} dates), size: {data_size_kb:.2f} KB")
-            
+        
         except Exception as e:
             logger.error(f"Error caching data for {ticker}: {str(e)}")
     
@@ -415,40 +418,52 @@ class OptionsCache:
     
     def clear(self, ticker: Optional[str] = None):
         """Clear the cache for a specific ticker or all tickers."""
-        with self.lock:
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                
-                if ticker:
-                    # Clear specific ticker
-                    cursor.execute("DELETE FROM options_cache WHERE ticker = ?", (ticker,))
-                    logger.info(f"Cleared cache for {ticker}")
+        try:
+            if ticker:
+                # Use the ticker-specific lock for thread safety
+                with self.get_lock(ticker):
+                    # Connect to the database
+                    conn = sqlite3.connect(str(self.db_path))
+                    cursor = conn.cursor()
                     
-                    # Remove from cached_tickers set
+                    # Delete the ticker from the cache
+                    cursor.execute("DELETE FROM options_cache WHERE ticker = ?", (ticker,))
+                    
+                    # Commit changes and close connection
+                    conn.commit()
+                    conn.close()
+                    
+                    # Remove from cached tickers set
                     if ticker in self.cached_tickers:
                         self.cached_tickers.remove(ticker)
-                else:
-                    # Clear all tickers
+                    
+                    logger.info(f"Cleared cache for {ticker}")
+            else:
+                # Clear all tickers - use the global lock
+                with self.lock:
+                    # Connect to the database
+                    conn = sqlite3.connect(str(self.db_path))
+                    cursor = conn.cursor()
+                    
+                    # Delete all data from the cache
                     cursor.execute("DELETE FROM options_cache")
-                    logger.info("Cleared entire cache")
+                    
+                    # Commit changes and close connection
+                    conn.commit()
+                    conn.close()
+                    
+                    # Clear cached tickers set
                     self.cached_tickers.clear()
-                
-                conn.commit()
-                conn.close()
-                
-                # Vacuum the database to reclaim space
-                self._vacuum_db()
-                
-            except Exception as e:
-                logger.error(f"Error clearing cache: {str(e)}")
-                # Try to recover the database
-                self._recover_database()
+                    
+                    logger.info("Cleared entire cache")
+        except Exception as e:
+            logger.error(f"Error clearing cache: {str(e)}")
     
     def delete(self, ticker: str):
         """Delete a specific ticker from the cache."""
-        # This is just an alias for clear(ticker)
-        self.clear(ticker)
+        # Use the ticker-specific lock for thread safety
+        with self.get_lock(ticker):
+            self.clear(ticker)
     
     def maintenance(self):
         """Perform maintenance tasks on the cache database.
@@ -584,4 +599,18 @@ class OptionsCache:
         # Start polling thread
         polling_thread = threading.Thread(target=poll_cache, daemon=True)
         polling_thread.start()
-        logger.info("Started cache polling thread") 
+        logger.info("Started cache polling thread")
+    
+    def get_lock(self, ticker):
+        """Get a lock for a specific ticker.
+        
+        Args:
+            ticker: The stock ticker symbol
+            
+        Returns:
+            A threading.Lock object for the ticker
+        """
+        with self.lock:  # Protect the ticker_locks dictionary
+            if ticker not in self.ticker_locks:
+                self.ticker_locks[ticker] = threading.RLock()  # Use RLock to allow reentrant locking
+            return self.ticker_locks[ticker] 
