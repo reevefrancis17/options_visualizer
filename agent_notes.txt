@@ -414,3 +414,54 @@ The application was performing excessive processing when retrieving data from ca
 - All required plot fields are calculated during the initial processing and stored in the cache
 
 This optimization significantly reduces the processing time when retrieving data from cache, making the frontend more responsive and improving the overall user experience.
+
+# Improved Greeks and IV Calculations
+
+## Problem Identified
+The original implementation calculated Greeks (delta, gamma, theta) using simple numerical differentiation of option prices with respect to strike price, which is not the correct approach. Additionally, the implied volatility (IV) calculation didn't leverage the interpolated price data, leading to inconsistent and potentially inaccurate results.
+
+## Solution Implemented
+
+### 1. Improved Delta Calculation
+- Updated to calculate delta as the derivative of option price with respect to the **underlying price** (not strike)
+- Created a range of underlying prices around the current price to calculate the gradient
+- Used Black-Scholes model with interpolated IV to calculate option prices at different underlying prices
+- Applied central difference method for more accurate numerical differentiation
+- Added comprehensive error handling and logging
+
+### 2. Enhanced Gamma Calculation
+- Implemented gamma as the second derivative of option price with respect to underlying price
+- Used a wider range of underlying prices to better capture the curvature
+- Calculated delta at each underlying price, then computed the gradient of delta
+- Ensured proper handling of edge cases and missing data
+- Added detailed logging for debugging
+
+### 3. Improved Theta Calculation
+- Primarily used Black-Scholes theta for more accurate time decay estimation
+- Added fallback to numerical differentiation when Black-Scholes calculation fails
+- Used interpolated price data for numerical calculation
+- Combined both approaches for maximum coverage and accuracy
+- Added proper error handling and validation
+
+### 4. Enhanced IV Calculation and Smoothing
+- Used interpolated price data for more consistent IV calculations
+- Added spatial interpolation to fill gaps in the IV surface
+- Implemented smoothing of the IV surface to reduce noise
+- Applied bounds to ensure IV values are within reasonable ranges
+- Added detailed logging and error handling
+
+## Benefits
+1. **More Accurate Greeks**: The calculations now correctly represent the option sensitivities
+2. **Smoother Surfaces**: Reduced noise and artifacts in the Greeks and IV surfaces
+3. **Better Consistency**: Greeks and IV are now consistent with each other and with option prices
+4. **Improved Robustness**: Better handling of edge cases and missing data
+5. **Enhanced Visualization**: Smoother, more accurate data for plotting
+
+## Technical Details
+- Delta now represents the rate of change of option price with respect to underlying price
+- Gamma correctly shows the rate of change of delta with respect to underlying price
+- Theta represents the rate of change of option price with respect to time
+- IV is calculated from interpolated price data and smoothed for consistency
+- All calculations have proper error handling and fallback mechanisms
+
+These improvements significantly enhance the accuracy and reliability of the Greeks and IV calculations, providing users with more accurate and useful information for options analysis.

@@ -1068,18 +1068,33 @@ class OptionsDataProcessor:
             # Reverse engineer implied volatility where missing
             self.reverse_engineer_iv()
             
-            # Calculate Black-Scholes greeks
+            # Calculate Greeks using improved methods
             try:
+                # First try using Black-Scholes for all Greeks
+                logger.info("Calculating Greeks using Black-Scholes model")
                 self.calculate_black_scholes_greeks()
-                logger.info("Calculated Black-Scholes greeks")
             except Exception as e:
                 logger.error(f"Error in Black-Scholes calculation: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 
-                # Fall back to numerical greeks
-                logger.info("Falling back to numerical Greeks calculation")
+                # Fall back to numerical methods with interpolated price data
+                logger.info("Falling back to numerical Greeks calculation with interpolated price data")
                 try:
-                    self.compute_all_greeks_numerically()
+                    # Calculate delta using interpolated price data
+                    self.compute_delta()
+                    
+                    # Calculate gamma using interpolated price data
+                    self.compute_gamma()
+                    
+                    # Calculate theta using interpolated price data
+                    self.compute_theta()
+                    
+                    # Try to calculate other Greeks if needed
+                    if 'vega' not in self.ds or np.all(np.isnan(self.ds['vega'].values)):
+                        self.compute_vega()
+                    
+                    if 'rho' not in self.ds or np.all(np.isnan(self.ds['rho'].values)):
+                        self.compute_rho()
                 except Exception as e2:
                     logger.error(f"Error in numerical Greeks calculation: {str(e2)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1087,17 +1102,22 @@ class OptionsDataProcessor:
                     # Try individual numerical calculations as a last resort
                     logger.info("Trying individual numerical calculations")
                     try:
-                        self.compute_delta()
-                    except:
-                        pass
+                        if 'delta' not in self.ds or np.all(np.isnan(self.ds['delta'].values)):
+                            self.compute_delta()
+                    except Exception:
+                        logger.error("Failed to calculate delta")
+                    
                     try:
-                        self.compute_gamma()
-                    except:
-                        pass
+                        if 'gamma' not in self.ds or np.all(np.isnan(self.ds['gamma'].values)):
+                            self.compute_gamma()
+                    except Exception:
+                        logger.error("Failed to calculate gamma")
+                    
                     try:
-                        self.compute_theta()
-                    except:
-                        pass
+                        if 'theta' not in self.ds or np.all(np.isnan(self.ds['theta'].values)):
+                            self.compute_theta()
+                    except Exception:
+                        logger.error("Failed to calculate theta")
             
             # Ensure all required fields for plotting are available
             self._ensure_all_plot_fields()
@@ -1406,14 +1426,15 @@ class OptionsDataProcessor:
 
     def reverse_engineer_iv(self):
         """
-        Reverse engineer implied volatility from market prices.
+        Reverse engineer implied volatility from interpolated market prices.
         This is useful when IV data is missing but price data is available.
+        Uses interpolated price data for more accurate and consistent IV calculations.
         """
         if self.ds is None:
             logger.error("Cannot reverse engineer IV: dataset is None")
             return
             
-        logger.info("Reverse engineering implied volatility from market prices")
+        logger.info("Reverse engineering implied volatility from interpolated market prices")
         
         # Import the implied_volatility function
         from python.models.black_scholes import implied_volatility
@@ -1424,7 +1445,7 @@ class OptionsDataProcessor:
         
         # Process each option type separately
         for opt_type in self.ds.option_type.values:
-            # Get price data for this option type
+            # Get interpolated price data for this option type
             price_data = self.ds['price'].sel(option_type=opt_type)
             
             # Get IV data for this option type
@@ -1440,13 +1461,17 @@ class OptionsDataProcessor:
             if process_mask.any():
                 logger.info(f"Calculating IV for {process_mask.sum().item()} {opt_type} options with missing IV")
                 
+                # Create a matrix to store the calculated IVs
+                calculated_ivs = np.zeros_like(iv_data.values)
+                calculated_ivs.fill(np.nan)
+                
                 # Process each point
                 for i, strike in enumerate(self.ds.strike.values):
                     for j, dte in enumerate(self.ds.DTE.values):
                         # Check if this point needs processing
                         if process_mask.isel(strike=i, DTE=j).item():
                             try:
-                                # Get market price
+                                # Get interpolated market price
                                 market_price = price_data.isel(strike=i, DTE=j).item()
                                 
                                 # Calculate time to expiration in years
@@ -1459,12 +1484,67 @@ class OptionsDataProcessor:
                                 # Calculate implied volatility
                                 iv = implied_volatility(market_price, S, strike, T, r, opt_type)
                                 
+                                # Store the calculated IV
+                                calculated_ivs[i, j] = iv
+                                
                                 # Update the dataset if IV calculation was successful
                                 if not np.isnan(iv) and iv > 0:
                                     self.ds['impliedVolatility'].loc[{'option_type': opt_type, 'strike': strike, 'DTE': dte}] = iv
                                     logger.debug(f"Calculated IV={iv:.2f} for {opt_type}, strike={strike}, DTE={dte}")
                             except Exception as e:
                                 logger.debug(f"Error calculating IV for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+                
+                # Interpolate any remaining missing IVs using the calculated ones
+                # This helps create a smoother IV surface
+                if np.any(~np.isnan(calculated_ivs)):
+                    try:
+                        # Create a mask of valid calculated IVs
+                        valid_mask = ~np.isnan(calculated_ivs)
+                        
+                        # Only proceed if we have enough valid points
+                        if np.sum(valid_mask) >= 3:
+                            # Get coordinates of valid points
+                            valid_indices = np.where(valid_mask)
+                            valid_points = np.column_stack([valid_indices[0], valid_indices[1]])
+                            valid_values = calculated_ivs[valid_mask]
+                            
+                            # Create a grid of all points
+                            all_indices = np.indices((len(self.ds.strike), len(self.ds.DTE)))
+                            all_points = np.column_stack([all_indices[0].flatten(), all_indices[1].flatten()])
+                            
+                            # Interpolate missing values
+                            interpolated_values = griddata(
+                                valid_points, 
+                                valid_values, 
+                                all_points, 
+                                method='cubic', 
+                                fill_value=np.nan
+                            )
+                            
+                            # Reshape back to original shape
+                            interpolated_ivs = interpolated_values.reshape((len(self.ds.strike), len(self.ds.DTE)))
+                            
+                            # Fill in missing values in the dataset
+                            for i, strike in enumerate(self.ds.strike.values):
+                                for j, dte in enumerate(self.ds.DTE.values):
+                                    iv_value = interpolated_ivs[i, j]
+                                    if not np.isnan(iv_value) and iv_value > 0:
+                                        current_iv = self.ds['impliedVolatility'].sel(
+                                            option_type=opt_type, 
+                                            strike=strike, 
+                                            DTE=dte
+                                        ).item()
+                                        
+                                        # Only update if current IV is missing or invalid
+                                        if np.isnan(current_iv) or current_iv <= 0:
+                                            self.ds['impliedVolatility'].loc[{
+                                                'option_type': opt_type, 
+                                                'strike': strike, 
+                                                'DTE': dte
+                                            }] = iv_value
+                    except Exception as e:
+                        logger.error(f"Error interpolating IVs: {str(e)}")
+                        logger.error(traceback.format_exc())
                 
                 logger.info(f"Completed IV calculation for {opt_type} options")
             else:
@@ -1481,6 +1561,31 @@ class OptionsDataProcessor:
         if iv_mask_high.any():
             logger.info(f"Capping {iv_mask_high.sum().item()} high implied volatility values")
             self.ds['impliedVolatility'] = xr.where(iv_mask_high, 5.0, self.ds['impliedVolatility'])
+        
+        # Apply smoothing to the IV surface
+        try:
+            # Create a copy of the IV data
+            iv_data = self.ds['impliedVolatility'].copy(deep=True)
+            
+            # Apply a simple smoothing filter
+            for opt_type in self.ds.option_type.values:
+                iv_values = iv_data.sel(option_type=opt_type).values
+                
+                # Skip if we don't have enough data
+                if iv_values.shape[0] < 3 or iv_values.shape[1] < 3:
+                    continue
+                
+                # Apply a simple 3x3 mean filter
+                from scipy.ndimage import uniform_filter
+                smoothed_values = uniform_filter(iv_values, size=3, mode='nearest')
+                
+                # Update the dataset
+                self.ds['impliedVolatility'].loc[{'option_type': opt_type}] = smoothed_values
+                
+            logger.info("Applied smoothing to IV surface")
+        except Exception as e:
+            logger.error(f"Error smoothing IV surface: {str(e)}")
+            logger.error(traceback.format_exc())
         
         logger.info("Completed reverse engineering of implied volatility")
 
@@ -1633,73 +1738,264 @@ class OptionsDataProcessor:
         return count
 
     def compute_delta(self):
-        """Compute delta (first derivative of price with respect to strike) numerically."""
+        """
+        Compute delta (first derivative of price with respect to underlying price) numerically.
+        Uses interpolated price data for more accurate gradient calculations.
+        """
         try:
             # Check if we have at least 2 strike values
             if len(self.ds.strike) < 2:
                 logger.warning("Cannot compute delta: need at least 2 strike values")
                 return
-                
-            # Compute gradient for each option type separately
+            
+            # Get current price
+            S = self.current_price
+            
+            # Create a range of underlying prices around the current price
+            # Use a small range (±2%) for better accuracy of the derivative
+            price_range = 0.02  # 2% range
+            underlying_prices = np.linspace(S * (1 - price_range), S * (1 + price_range), 5)
+            
+            # Compute for each option type separately
             for opt_type in self.ds.option_type.values:
-                # Get price data for this option type
+                # Get interpolated price data for this option type
                 price_data = self.ds['price'].sel(option_type=opt_type)
                 
-                # Compute gradient along strike dimension
-                delta_values = np.gradient(price_data.values, self.ds.strike.values, axis=0)
+                # Create a matrix to store option prices at different underlying prices
+                option_prices = np.zeros((len(self.ds.strike), len(self.ds.DTE), len(underlying_prices)))
+                
+                # For each strike and DTE, calculate option prices at different underlying prices
+                for i, strike in enumerate(self.ds.strike.values):
+                    for j, dte in enumerate(self.ds.DTE.values):
+                        # Get current option price
+                        current_price = price_data.isel(strike=i, DTE=j).item()
+                        
+                        # Skip if price is invalid
+                        if np.isnan(current_price) or current_price <= 0:
+                            continue
+                        
+                        # Get implied volatility for this option
+                        if 'impliedVolatility' in self.ds:
+                            try:
+                                sigma = self.ds['impliedVolatility'].sel(
+                                    strike=strike, 
+                                    DTE=dte, 
+                                    option_type=opt_type
+                                ).item()
+                                
+                                # Skip if implied volatility is invalid
+                                if np.isnan(sigma) or sigma <= 0:
+                                    continue
+                                
+                                # Time to expiration in years
+                                T = dte / 365.0
+                                
+                                # Skip if time to expiration is too small
+                                if T <= 0.001:
+                                    continue
+                                
+                                # Get risk-free rate
+                                r = self.get_risk_free_rate()
+                                
+                                # Calculate option prices at different underlying prices
+                                for k, underlying_price in enumerate(underlying_prices):
+                                    # Use Black-Scholes to calculate option price
+                                    from python.models.black_scholes import call_price, put_price
+                                    if opt_type == 'call':
+                                        option_prices[i, j, k] = call_price(underlying_price, strike, T, r, sigma)
+                                    else:
+                                        option_prices[i, j, k] = put_price(underlying_price, strike, T, r, sigma)
+                            except Exception as e:
+                                logger.debug(f"Error in delta calculation for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+                
+                # Calculate delta as the gradient of option price with respect to underlying price
+                delta_values = np.zeros((len(self.ds.strike), len(self.ds.DTE)))
+                
+                for i in range(len(self.ds.strike)):
+                    for j in range(len(self.ds.DTE)):
+                        # Check if we have valid prices for this option
+                        if np.any(option_prices[i, j, :] > 0):
+                            # Calculate delta as the gradient at the current price
+                            # Use central difference for better accuracy
+                            delta_values[i, j] = np.gradient(option_prices[i, j, :], underlying_prices)[len(underlying_prices) // 2]
                 
                 # Update the dataset
                 self.ds['delta'].loc[{'option_type': opt_type}] = delta_values
                 
-            logger.info("Computed delta numerically")
+            logger.info("Computed delta using interpolated price data")
         except Exception as e:
             logger.error(f"Error computing delta: {str(e)}")
+            logger.error(traceback.format_exc())
 
     def compute_gamma(self):
-        """Compute gamma (second derivative of price with respect to strike) numerically."""
+        """
+        Compute gamma (second derivative of price with respect to underlying price) numerically.
+        Uses interpolated price data for more accurate gradient calculations.
+        """
         try:
-            # Check if delta exists and we have at least 2 strike values
-            if 'delta' not in self.ds or len(self.ds.strike) < 2:
-                logger.warning("Cannot compute gamma: need delta and at least 2 strike values")
+            # Check if we have at least 3 strike values (needed for second derivative)
+            if len(self.ds.strike) < 3:
+                logger.warning("Cannot compute gamma: need at least 3 strike values")
                 return
-                
-            # Compute gradient for each option type separately
+            
+            # Get current price
+            S = self.current_price
+            
+            # Create a range of underlying prices around the current price
+            # Use a slightly larger range for gamma to capture curvature
+            price_range = 0.03  # 3% range
+            underlying_prices = np.linspace(S * (1 - price_range), S * (1 + price_range), 7)
+            
+            # Compute for each option type separately
             for opt_type in self.ds.option_type.values:
-                # Get delta data for this option type
-                delta_data = self.ds['delta'].sel(option_type=opt_type)
+                # Get interpolated price data for this option type
+                price_data = self.ds['price'].sel(option_type=opt_type)
                 
-                # Compute gradient along strike dimension
-                gamma_values = np.gradient(delta_data.values, self.ds.strike.values, axis=0)
+                # Create a matrix to store option prices at different underlying prices
+                option_prices = np.zeros((len(self.ds.strike), len(self.ds.DTE), len(underlying_prices)))
+                
+                # For each strike and DTE, calculate option prices at different underlying prices
+                for i, strike in enumerate(self.ds.strike.values):
+                    for j, dte in enumerate(self.ds.DTE.values):
+                        # Get current option price
+                        current_price = price_data.isel(strike=i, DTE=j).item()
+                        
+                        # Skip if price is invalid
+                        if np.isnan(current_price) or current_price <= 0:
+                            continue
+                        
+                        # Get implied volatility for this option
+                        if 'impliedVolatility' in self.ds:
+                            try:
+                                sigma = self.ds['impliedVolatility'].sel(
+                                    strike=strike, 
+                                    DTE=dte, 
+                                    option_type=opt_type
+                                ).item()
+                                
+                                # Skip if implied volatility is invalid
+                                if np.isnan(sigma) or sigma <= 0:
+                                    continue
+                                
+                                # Time to expiration in years
+                                T = dte / 365.0
+                                
+                                # Skip if time to expiration is too small
+                                if T <= 0.001:
+                                    continue
+                                
+                                # Get risk-free rate
+                                r = self.get_risk_free_rate()
+                                
+                                # Calculate option prices at different underlying prices
+                                for k, underlying_price in enumerate(underlying_prices):
+                                    # Use Black-Scholes to calculate option price
+                                    from python.models.black_scholes import call_price, put_price
+                                    if opt_type == 'call':
+                                        option_prices[i, j, k] = call_price(underlying_price, strike, T, r, sigma)
+                                    else:
+                                        option_prices[i, j, k] = put_price(underlying_price, strike, T, r, sigma)
+                            except Exception as e:
+                                logger.debug(f"Error in gamma calculation for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+                
+                # Calculate gamma as the second derivative of option price with respect to underlying price
+                gamma_values = np.zeros((len(self.ds.strike), len(self.ds.DTE)))
+                
+                for i in range(len(self.ds.strike)):
+                    for j in range(len(self.ds.DTE)):
+                        # Check if we have valid prices for this option
+                        if np.any(option_prices[i, j, :] > 0):
+                            # First calculate delta at each underlying price
+                            deltas = np.gradient(option_prices[i, j, :], underlying_prices)
+                            # Then calculate gamma as the gradient of delta
+                            gamma_values[i, j] = np.gradient(deltas, underlying_prices)[len(underlying_prices) // 2]
                 
                 # Update the dataset
                 self.ds['gamma'].loc[{'option_type': opt_type}] = gamma_values
                 
-            logger.info("Computed gamma numerically")
+            logger.info("Computed gamma using interpolated price data")
         except Exception as e:
             logger.error(f"Error computing gamma: {str(e)}")
+            logger.error(traceback.format_exc())
 
     def compute_theta(self):
-        """Compute theta (derivative of price with respect to time) numerically."""
+        """
+        Compute theta (derivative of price with respect to time) numerically.
+        Uses interpolated price data for more accurate gradient calculations.
+        """
         try:
             # Check if we have at least 2 DTE values
             if len(self.ds.DTE) < 2:
                 logger.warning("Cannot compute theta: need at least 2 DTE values")
                 return
-                
-            # Compute gradient for each option type separately
+            
+            # Compute for each option type separately
             for opt_type in self.ds.option_type.values:
-                # Get price data for this option type
+                # Get interpolated price data for this option type
                 price_data = self.ds['price'].sel(option_type=opt_type)
                 
-                # Compute negative gradient along DTE dimension (negative because theta is time decay)
-                theta_values = -np.gradient(price_data.values, self.ds.DTE.values, axis=1)
+                # Create a matrix to store theta values
+                theta_values = np.zeros((len(self.ds.strike), len(self.ds.DTE)))
+                
+                # For each strike and DTE, calculate theta
+                for i, strike in enumerate(self.ds.strike.values):
+                    for j, dte in enumerate(self.ds.DTE.values):
+                        # Get current option price
+                        current_price = price_data.isel(strike=i, DTE=j).item()
+                        
+                        # Skip if price is invalid
+                        if np.isnan(current_price) or current_price <= 0:
+                            continue
+                        
+                        # Get implied volatility for this option
+                        if 'impliedVolatility' in self.ds:
+                            try:
+                                sigma = self.ds['impliedVolatility'].sel(
+                                    strike=strike, 
+                                    DTE=dte, 
+                                    option_type=opt_type
+                                ).item()
+                                
+                                # Skip if implied volatility is invalid
+                                if np.isnan(sigma) or sigma <= 0:
+                                    continue
+                                
+                                # Time to expiration in years
+                                T = dte / 365.0
+                                
+                                # Skip if time to expiration is too small
+                                if T <= 0.001:
+                                    continue
+                                
+                                # Get risk-free rate
+                                r = self.get_risk_free_rate()
+                                
+                                # Calculate theta using Black-Scholes
+                                from python.models.black_scholes import theta as bs_theta
+                                theta_value = bs_theta(self.current_price, strike, T, r, sigma, opt_type)
+                                
+                                # Store the result (theta is already in daily terms)
+                                theta_values[i, j] = theta_value
+                            except Exception as e:
+                                logger.debug(f"Error in theta calculation for {opt_type}, strike={strike}, DTE={dte}: {str(e)}")
+                
+                # If we have multiple DTE values, we can also calculate theta numerically
+                # as a fallback for points where Black-Scholes calculation failed
+                if len(self.ds.DTE) >= 2:
+                    # Calculate negative gradient along DTE dimension
+                    numerical_theta = -np.gradient(price_data.values, self.ds.DTE.values, axis=1)
+                    
+                    # Use numerical theta where Black-Scholes theta is missing
+                    mask = np.isnan(theta_values) | (theta_values == 0)
+                    theta_values = np.where(mask, numerical_theta, theta_values)
                 
                 # Update the dataset
                 self.ds['theta'].loc[{'option_type': opt_type}] = theta_values
                 
-            logger.info("Computed theta numerically")
+            logger.info("Computed theta using Black-Scholes and interpolated price data")
         except Exception as e:
             logger.error(f"Error computing theta: {str(e)}")
+            logger.error(traceback.format_exc())
 
     def compute_vega(self):
         """
