@@ -217,6 +217,92 @@ def get_options_data():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e), 'status': 'error'}), 500
 
+@app.route('/api/options/<ticker>', methods=['GET'])
+def get_options_data_by_ticker(ticker):
+    """
+    API endpoint to get options data for a specific ticker.
+    This endpoint is used by the frontend to fetch options data.
+    """
+    try:
+        logger.info(f"Received request for options data for ticker: {ticker}")
+        
+        # Initialize the data manager if not already done
+        if not hasattr(app, 'data_manager'):
+            logger.info("Creating new OptionsDataManager instance")
+            app.data_manager = OptionsDataManager()
+        
+        # Get the options data
+        data_manager = app.data_manager
+        
+        # Check if we have data for this ticker
+        logger.info(f"Getting current processor for {ticker}")
+        processor, current_price, status, progress = data_manager.get_current_processor(ticker)
+        logger.info(f"Status for {ticker}: {status}, progress: {progress}, processor: {processor is not None}, price: {current_price}")
+        
+        # If no data or still loading
+        if status == 'loading' or not processor:
+            # Start loading data in the background if not already loading
+            if status != 'loading':
+                logger.info(f"Starting fetch for {ticker}")
+                data_manager.start_fetching(ticker)
+            
+            # Get loading state
+            loading_state = data_manager._loading_state.get(ticker, {})
+            processed_dates = loading_state.get('processed_dates', 0)
+            total_dates = loading_state.get('total_dates', 0)
+            logger.info(f"Loading state for {ticker}: processed_dates={processed_dates}, total_dates={total_dates}")
+            
+            # Return a loading status
+            return jsonify({
+                'status': 'loading',
+                'progress': progress,
+                'processed_dates': processed_dates,
+                'total_dates': total_dates,
+                'message': f'Loading data for {ticker}...'
+            })
+        
+        # If we have partial data
+        if status == 'partial':
+            # Get the data
+            logger.info(f"Getting partial data for {ticker}")
+            options_data = processor.get_data()
+            expiry_dates = processor.get_expirations()
+            logger.info(f"Got {len(expiry_dates)} expiry dates and options data: {options_data is not None}")
+            
+            # Get loading state
+            loading_state = data_manager._loading_state.get(ticker, {})
+            processed_dates = loading_state.get('processed_dates', 0)
+            total_dates = loading_state.get('total_dates', 0)
+            
+            return jsonify({
+                'status': 'partial',
+                'symbol': ticker,
+                'current_price': current_price,
+                'expiry_dates': expiry_dates,
+                'options_data': options_data,
+                'processed_dates': processed_dates,
+                'total_dates': total_dates
+            })
+        
+        # Return complete data
+        logger.info(f"Getting complete data for {ticker}")
+        options_data = processor.get_data()
+        expiry_dates = processor.get_expirations()
+        logger.info(f"Got {len(expiry_dates)} expiry dates and options data: {options_data is not None}")
+        
+        return jsonify({
+            'status': 'complete',
+            'symbol': ticker,
+            'current_price': current_price,
+            'expiry_dates': expiry_dates,
+            'options_data': options_data
+        })
+    
+    except Exception as e:
+        logger.error(f"Error processing request for ticker {ticker}: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 # Add health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():

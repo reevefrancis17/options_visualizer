@@ -246,3 +246,171 @@ These changes should result in smoother, more accurate interpolation of options 
 - Enhanced error handling throughout the processing pipeline
 
 These improvements make the options data processing more robust, accurate, and efficient, especially for edge cases and sparse datasets.
+
+# Options Visualizer - Agent Notes
+
+## Architecture Overview
+
+The Options Visualizer is a web application with a client-server architecture split into two main components:
+
+1. **Backend API Server (Port 5002)**
+   - Fetches options data from Yahoo Finance
+   - Processes and calculates options metrics (Greeks, IV, etc.)
+   - Caches data to improve performance
+   - Exposes RESTful API endpoints
+
+2. **Frontend Web Server (Port 5001)**
+   - Serves the web interface (HTML, CSS, JS)
+   - Makes API calls to the backend server
+   - Renders interactive visualizations using Plotly.js
+   - Handles user interactions and UI updates
+
+## Data Flow
+
+1. User enters a ticker symbol in the web interface
+2. Frontend makes API request to backend: GET /api/options/{ticker}
+3. Backend checks if data is cached:
+   - If cached and fresh: returns immediately
+   - If cached but stale: returns cached data and refreshes in background
+   - If not cached: fetches from Yahoo Finance
+4. Backend processes data:
+   - Calculates Greeks (Delta, Gamma, Theta)
+   - Computes intrinsic and extrinsic values
+   - Formats data for frontend consumption
+5. Frontend receives data and:
+   - Updates the UI with expiration dates
+   - Renders the options chain visualization
+   - Enables interactive features (hover, strike selection)
+
+## Key Components
+
+### Backend
+
+- **OptionsDataManager**: Central manager for options data handling
+- **YahooFinanceAPI**: Fetches raw options data from Yahoo Finance
+- **OptionsDataProcessor**: Processes raw data into usable format
+- **OptionsCache**: Caches processed data to improve performance
+
+### Frontend
+
+- **main.js**: Core frontend logic
+- **config.js**: Configuration settings
+- **style.css**: Styling for the web interface
+- **index.html**: Main HTML template
+
+## Changes Made
+
+1. **API Endpoint Alignment**:
+   - Added `/api/options/{ticker}` endpoint to match the standalone index.html
+   - Updated the frontend to use this endpoint
+
+2. **Date Format Handling**:
+   - Added date format conversion to ensure consistent YYYY-MM-DD format
+   - Fixed issues with date comparison and filtering
+
+3. **Error Handling Improvements**:
+   - Added more robust error handling in API calls
+   - Improved error messages and logging
+
+4. **Debug Logging**:
+   - Added extensive debug logging to help diagnose issues
+   - Logged API responses and data processing steps
+
+5. **Documentation Updates**:
+   - Updated README.md with clear instructions for test environment
+   - Created comprehensive agent_notes.txt (this file)
+   - Updated requirements.txt with all necessary dependencies
+
+## Running in Test Environment
+
+To run the application in a test environment:
+
+1. Start the backend server:
+   ```
+   python -m options_visualizer_backend.app
+   ```
+
+2. Start the frontend server:
+   ```
+   python -m options_visualizer_web.app
+   ```
+
+3. Access the web interface at http://localhost:5001
+
+## Common Issues and Solutions
+
+1. **Port Conflicts**:
+   - If port 5001 or 5002 is already in use, change the port using the PORT environment variable
+   - Update config.js to point to the correct backend port
+
+2. **Data Loading Issues**:
+   - Check browser console for JavaScript errors
+   - Check server logs for backend errors
+   - Verify internet connection and Yahoo Finance API availability
+
+3. **Cross-Origin Issues**:
+   - Ensure CORS is properly configured in the backend
+   - Check for browser security restrictions
+
+4. **Cache Issues**:
+   - Clear browser cache if frontend changes aren't reflected
+   - Backend cache is automatically managed
+
+## Future Improvements
+
+1. **Unified Server**:
+   - Combine frontend and backend into a single server for easier deployment
+   - Use a production-ready WSGI server like Gunicorn
+
+2. **Enhanced Error Recovery**:
+   - Implement more robust error recovery mechanisms
+   - Add automatic retries for failed API calls
+
+3. **UI Enhancements**:
+   - Add more interactive features
+   - Improve mobile responsiveness
+
+4. **Performance Optimizations**:
+   - Optimize data processing for large option chains
+   - Implement more efficient caching strategies
+
+# Cache Optimization for Improved Frontend Responsiveness
+
+## Problem Identified
+The application was performing excessive processing when retrieving data from cache, which impacted frontend responsiveness. Each time data was retrieved from cache, it would undergo unnecessary reprocessing, even if it was already fully processed.
+
+## Solution Implemented
+
+### 1. Store Fully Processed Data in Cache
+- Modified `_fetch_in_background` method to store the fully processed dataset in the cache
+- Added the xarray Dataset object directly to the cached data with the key 'dataset'
+- Added flags to indicate whether data is fully interpolated and processed
+
+### 2. Optimize Data Retrieval from Cache
+- Updated `get_current_processor` method to check if data is fully processed
+- Added a fast path to skip post-processing when data is already fully processed
+- Added logging to track when fully processed data is used directly
+
+### 3. Restructured Data Processing Pipeline
+- Created a unified `process_data` method that handles the entire processing pipeline
+- Added helper methods `_clean_dataframe` and `_convert_to_xarray` for better code organization
+- Ensured all required fields are calculated and available in the cached data
+
+### 4. Improved Error Handling and Recovery
+- Added better error handling throughout the caching and processing code
+- Implemented fallback mechanisms when data is incomplete or errors occur
+- Added detailed logging to help diagnose issues
+
+## Benefits
+1. **Faster Response Times**: Eliminates redundant processing when serving cached data
+2. **Reduced CPU Usage**: Avoids recalculating expensive operations like interpolation and Greeks
+3. **Better Memory Efficiency**: Stores processed data in a more efficient format
+4. **Improved User Experience**: Frontend responds more quickly, especially for frequently accessed tickers
+
+## Technical Details
+- The cached data now includes the pre-computed xarray Dataset object
+- A flag `_is_fully_interpolated` indicates whether the data has been fully processed
+- The `get_current_processor` method now checks this flag to determine if post-processing can be skipped
+- All required plot fields are calculated during the initial processing and stored in the cache
+
+This optimization significantly reduces the processing time when retrieving data from cache, making the frontend more responsive and improving the overall user experience.

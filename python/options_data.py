@@ -147,8 +147,15 @@ class OptionsDataManager:
                     else:
                         status = 'complete'
                 
-                # Create processor from cache
+                # Create processor from cache with minimal processing
+                # Use is_processed=True to skip expensive post-processing steps
                 processor = OptionsDataProcessor(options_data, price, is_processed=True)
+                
+                # Skip any additional processing if the data is fully interpolated
+                if is_fully_interpolated and 'dataset' in options_data:
+                    logger.info(f"Using fully processed cached data for {ticker} - skipping post-processing")
+                    return processor, price, status, progress
+                
                 return processor, price, status, progress
             except Exception as e:
                 logger.error(f"Error creating processor from cache for {ticker}: {str(e)}")
@@ -301,10 +308,10 @@ class OptionsDataManager:
                     try:
                         logger.info(f"Processing complete data for {ticker} with {processed_dates} dates")
                         # Always process with interpolation for the final cached version
-                        # This is the key change - we're forcing interpolation for the cached version
                         
                         # Use the cache's ticker lock for thread safety during processing
                         with self._cache.get_lock(ticker):
+                            # Create a processor with full interpolation and processing
                             processor = OptionsDataProcessor(raw_data_collection, final_current_price, 
                                                             is_processed=False, 
                                                             skip_interpolation=False)  # Always do interpolation for cached data
@@ -318,10 +325,17 @@ class OptionsDataManager:
                                 self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
                                 return
                             
+                            # Force post-processing to ensure all fields are available
+                            logger.info(f"Running post-processing for {ticker} to ensure all fields are available")
+                            processor.post_process_data()
+                            
                             # Get the fully processed data with interpolation
                             processed_data = processor.options_data
                             
-                            # Add a flag to indicate this data is fully interpolated
+                            # Store the dataset in the processed data to avoid reprocessing
+                            processed_data['dataset'] = processor.ds
+                            
+                            # Add a flag to indicate this data is fully interpolated and processed
                             processed_data['_is_fully_interpolated'] = True
                             processed_data['_last_updated'] = time.time()  # Add timestamp for cache age tracking
                             
@@ -333,23 +347,26 @@ class OptionsDataManager:
                                 'volume', 'spread', 'intrinsic_value', 'extrinsic_value'
                             ]
                             
-                            # Check if processed_data has data_vars attribute
-                            if hasattr(processed_data, 'data_vars'):
+                            # Check if all required fields are available in the dataset
+                            if processor.ds is not None:
                                 for field in required_fields:
-                                    if field not in processed_data.data_vars:
+                                    if field not in processor.ds.data_vars:
                                         logger.warning(f"Field {field} is missing from processed data")
                                         all_fields_available = False
                                 
                                 if not all_fields_available:
-                                    logger.warning(f"Some required plot fields are missing - forcing post-processing")
-                                    # Force post-processing to ensure all fields are available
+                                    logger.warning(f"Some required plot fields are missing - forcing additional processing")
+                                    # Force additional processing to ensure all fields are available
                                     processor._ensure_all_plot_fields()
                                     processor.apply_floors()
+                                    
+                                    # Update the processed data with the fully processed dataset
                                     processed_data = processor.options_data
+                                    processed_data['dataset'] = processor.ds
                                     processed_data['_is_fully_interpolated'] = True
-                                    processed_data['_last_updated'] = time.time()  # Add timestamp for cache age tracking
+                                    processed_data['_last_updated'] = time.time()
                             else:
-                                logger.warning(f"Processed data does not have data_vars attribute")
+                                logger.warning(f"Processor dataset is None after processing")
                             
                             # Final update to cache with fully processed data
                             self._cache.set(ticker, processed_data, final_current_price, processed_dates, total_dates)
@@ -501,326 +518,178 @@ class OptionsDataProcessor:
         
         # If data is already processed (from cache), we can skip processing steps
         if is_processed:
-            logger.info("Using fully processed and interpolated data from cache")
-            # Extract min/max strike from the options_data if available
-            if isinstance(options_data, dict):
+            logger.info("Using processed data from cache")
+            
+            # Check if we have a pre-processed dataset in the options_data
+            if isinstance(options_data, dict) and 'dataset' in options_data:
+                logger.info("Found pre-processed dataset in cache - using directly")
+                self.ds = options_data['dataset']
+                
+                # Extract min/max strike if available
                 if 'min_strike' in options_data and 'max_strike' in options_data:
                     self.min_strike = options_data['min_strike']
                     self.max_strike = options_data['max_strike']
                     logger.info(f"Loaded strike range from cache: {self.min_strike} to {self.max_strike}")
-                    # Remove these from options_data to avoid confusion
-                    processed_data = {k: v for k, v in options_data.items() if k not in ['min_strike', 'max_strike']}
-                else:
-                    processed_data = options_data
                 
-                # Get the dataset if available
-                if 'dataset' in processed_data:
-                    self.ds = processed_data['dataset']
-                    if self.ds is not None:
-                        logger.info(f"Loaded dataset from cache with dimensions: {list(self.ds.dims)}")
-                        
-                        # Verify that the dataset has all required dimensions
-                        required_dims = ['strike', 'DTE', 'option_type']
-                        missing_dims = [dim for dim in required_dims if dim not in self.ds.dims]
-                        
-                        if missing_dims:
-                            logger.warning(f"Dataset from cache is missing dimensions: {missing_dims}")
+                # Check if the dataset has all required dimensions
+                if self.ds is not None:
+                    logger.info(f"Loaded dataset from cache with dimensions: {list(self.ds.dims)}")
+                    
+                    # Verify that the dataset has all required dimensions
+                    required_dims = ['strike', 'DTE', 'option_type']
+                    missing_dims = [dim for dim in required_dims if dim not in self.ds.dims]
+                    
+                    if missing_dims:
+                        logger.warning(f"Dataset from cache is missing dimensions: {missing_dims}")
+                        # Try to recover by adding missing dimensions
+                        try:
+                            for dim in missing_dims:
+                                if dim == 'strike':
+                                    # Use min/max strike or current price if available
+                                    if self.min_strike is not None and self.max_strike is not None:
+                                        strikes = [self.min_strike, self.current_price, self.max_strike]
+                                    else:
+                                        strikes = [self.current_price]
+                                    self.ds = self.ds.expand_dims({'strike': strikes})
+                                elif dim == 'DTE':
+                                    # Default to 0 days to expiration
+                                    self.ds = self.ds.expand_dims({'DTE': [0]})
+                                elif dim == 'option_type':
+                                    # Default to both call and put
+                                    self.ds = self.ds.expand_dims({'option_type': ['call', 'put']})
                             
-                            # Try to recover by adding missing dimensions
-                            try:
-                                for dim in missing_dims:
-                                    if dim == 'strike':
-                                        # Use min/max strike or current price if available
-                                        if self.min_strike is not None and self.max_strike is not None:
-                                            strikes = [self.min_strike, self.current_price, self.max_strike]
-                                        else:
-                                            strikes = [self.current_price]
-                                        self.ds = self.ds.expand_dims({'strike': strikes})
-                                    elif dim == 'DTE':
-                                        # Default to 0 days to expiration
-                                        self.ds = self.ds.expand_dims({'DTE': [0]})
-                                    elif dim == 'option_type':
-                                        # Default to both call and put
-                                        self.ds = self.ds.expand_dims({'option_type': ['call', 'put']})
-                                
-                                logger.info(f"Recovered dataset with dimensions: {list(self.ds.dims)}")
-                            except Exception as e:
-                                logger.error(f"Failed to recover dataset: {str(e)}")
-                                logger.error(f"Traceback: {traceback.format_exc()}")
-                                # Set to None to force reprocessing
-                                self.ds = None
-                    else:
-                        logger.warning("Dataset from cache is None")
+                            logger.info(f"Recovered dataset with dimensions: {list(self.ds.dims)}")
+                        except Exception as e:
+                            logger.error(f"Failed to recover dataset: {str(e)}")
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                            # Set to None to force reprocessing
+                            self.ds = None
                 else:
-                    logger.warning("Processed data from cache does not contain a dataset")
-                
-                # Get risk-free rate if available
-                if 'risk_free_rate' in processed_data:
-                    self.risk_free_rate = processed_data.get('risk_free_rate')
-                else:
-                    self.risk_free_rate = self.get_risk_free_rate()
+                    logger.warning("Dataset from cache is None, will need to reprocess")
             else:
-                logger.warning(f"Processed data from cache is not a dictionary: {type(options_data).__name__}")
-                # Try to process the data as raw data
-                logger.info("Attempting to process as raw data")
-                is_processed = False
-                # Initialize risk_free_rate
-                self.risk_free_rate = self.get_risk_free_rate()
-        
-        # If not processed or no dataset was found, process the raw data
-        if not is_processed or self.ds is None:
-            # Process the raw data
-            logger.info("Processing raw options data")
-            start_time = time.time()
-            try:
-                self.ds = self.pre_process_data()
-                pre_process_time = time.time() - start_time
-                logger.info(f"Pre-processing completed in {pre_process_time:.2f} seconds")
-                
-                if self.ds is None:
-                    logger.error("Failed to pre-process data, dataset is None")
-                    return
-                
-                # Only interpolate if not skipped
-                if not skip_interpolation:
-                    start_time = time.time()
+                # Extract min/max strike if available
+                if isinstance(options_data, dict):
+                    if 'min_strike' in options_data and 'max_strike' in options_data:
+                        self.min_strike = options_data['min_strike']
+                        self.max_strike = options_data['max_strike']
+                        logger.info(f"Loaded strike range from cache: {self.min_strike} to {self.max_strike}")
+                        # Remove these from options_data to avoid confusion
+                        processed_data = {k: v for k, v in options_data.items() if k not in ['min_strike', 'max_strike']}
+                    else:
+                        processed_data = options_data
                     
-                    # Perform 2D interpolation
-                    logger.info("Performing 2D interpolation")
-                    self.interpolate_missing_values_2d()
-                    
-                    interpolate_time = time.time() - start_time
-                    logger.info(f"Interpolation completed in {interpolate_time:.2f} seconds")
+                    # Process the data if we don't have a pre-processed dataset
+                    logger.info("No pre-processed dataset found in cache, processing data")
+                    self.process_data(processed_data)
                 else:
-                    logger.info("Skipping interpolation as requested (for immediate use only)")
-                
-                start_time = time.time()
-                self.post_process_data()
-                post_process_time = time.time() - start_time
-                logger.info(f"Post-processing completed in {post_process_time:.2f} seconds")
-                
-                # Initialize risk_free_rate if not already set
-                if self.risk_free_rate is None:
-                    self.risk_free_rate = self.get_risk_free_rate()
-                
-                # Store processed data for caching
-                self.options_data = {
-                    'dataset': self.ds,
-                    'min_strike': self.min_strike,
-                    'max_strike': self.max_strike,
-                    'risk_free_rate': self.risk_free_rate
-                }
-            except Exception as e:
-                logger.error(f"Error processing options data: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                raise
+                    logger.warning("Options data is not a dictionary, will try to process anyway")
+                    self.process_data(options_data)
+        else:
+            # Process raw data
+            logger.info("Processing raw data")
+            self.process_data(options_data)
 
-    def pre_process_data(self):
-        """Pre-process the options data into a structured format."""
+    def process_data(self, options_data):
+        """Process the raw options data into a structured format."""
         try:
             logger.info(f"Processing options data with current price: {self.current_price}")
             
+            # Initialize risk_free_rate
+            self.risk_free_rate = self.get_risk_free_rate()
+            
+            # Pre-process the data
+            start_time = time.time()
+            
             # Get all expiration dates, filtering out metadata fields (those starting with underscore)
-            exp_dates = [exp for exp in self.options_data.keys() if not exp.startswith('_')]
+            exp_dates = [exp for exp in options_data.keys() if not exp.startswith('_')]
             
             if not exp_dates:
                 logger.error("No expiration dates found in options data")
-                return None
+                raise ValueError("No expiration dates found in options data")
             
             # Sort expiration dates
-            exp_dates.sort()
+            exp_dates = sorted(exp_dates, key=lambda x: pd.to_datetime(x))
             
-            # Process in batches to reduce memory usage
+            # Process in batches to avoid memory issues
             batch_size = 10
-            now = pd.Timestamp.now().normalize()
             all_dfs = []
+            now = pd.Timestamp.now().normalize()
             
             for i in range(0, len(exp_dates), batch_size):
                 batch_exps = exp_dates[i:i+batch_size]
                 batch_dfs = []
                 
                 for exp in batch_exps:
-                    data = self.options_data[exp]
+                    data = options_data[exp]
                     exp_date = pd.to_datetime(exp).normalize()
                     dte = max(0, (exp_date - now).days)
                     
-                    for opt_type, df in [('call', data.get('calls', pd.DataFrame())), ('put', data.get('puts', pd.DataFrame()))]:
-                        # Check if df is a DataFrame and not empty, or if it's a list with items
-                        if (isinstance(df, pd.DataFrame) and not df.empty) or (isinstance(df, list) and df):
-                            # Convert to DataFrame if it's a list
-                            if isinstance(df, list):
-                                df = pd.DataFrame(df)
-                            
-                            # Only keep necessary columns to reduce memory usage
-                            keep_cols = [
-                                'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
-                                'openInterest', 'impliedVolatility', 'inTheMoney', 'strike',
-                                'contractSymbol', 'lastTradeDate', 'contractSize', 'currency'
-                            ]
-                            df = df[[col for col in keep_cols if col in df.columns]].copy()
-                            
-                            df['option_type'] = opt_type
-                            df['expiration'] = exp_date
-                            df['DTE'] = dte
-                            batch_dfs.append(df)
+                    # Process calls
+                    if 'calls' in data and data['calls']:
+                        df_calls = pd.DataFrame(data['calls'])
+                        df_calls['option_type'] = 'call'
+                        df_calls['expiration'] = exp_date
+                        df_calls['DTE'] = dte
+                        batch_dfs.append(df_calls)
+                    
+                    # Process puts
+                    if 'puts' in data and data['puts']:
+                        df_puts = pd.DataFrame(data['puts'])
+                        df_puts['option_type'] = 'put'
+                        df_puts['expiration'] = exp_date
+                        df_puts['DTE'] = dte
+                        batch_dfs.append(df_puts)
                 
                 if batch_dfs:
-                    # Concatenate batch and append to main list
+                    # Combine all dataframes in this batch
                     batch_df = pd.concat(batch_dfs, ignore_index=True)
                     all_dfs.append(batch_df)
-                    
-                    # Clear memory
-                    del batch_dfs
             
             if not all_dfs:
-                logger.error("No valid data to process")
-                return None
+                logger.error("No valid options data found")
+                raise ValueError("No valid options data found")
             
-            # Concatenate all batches
+            # Combine all batches
             df = pd.concat(all_dfs, ignore_index=True)
             
-            # Define numeric columns explicitly
-            numeric_cols = [
-                'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
-                'openInterest', 'impliedVolatility', 'inTheMoney', 'strike'
-            ]
+            # Clean up column names and data types
+            df = self._clean_dataframe(df)
             
-            # Convert to numeric, coercing errors to NaN
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                    logger.info(f"Converted {col} to numeric, NaN count: {df[col].isna().sum()}")
+            # Convert to xarray Dataset
+            ds = self._convert_to_xarray(df)
             
-            # Calculate derived values
-            df['mid_price'] = (df['bid'] + df['ask']) / 2
-            df['price'] = df['mid_price']
+            # Store the dataset
+            self.ds = ds
             
-            # Calculate intrinsic values efficiently using vectorized operations
-            mask_call = df['option_type'] == 'call'
-            df.loc[mask_call, 'intrinsic_value'] = np.maximum(0, self.current_price - df.loc[mask_call, 'strike'])
-            df.loc[~mask_call, 'intrinsic_value'] = np.maximum(0, df.loc[~mask_call, 'strike'] - self.current_price)
-            df['extrinsic_value'] = df['price'] - df['intrinsic_value']
+            pre_process_time = time.time() - start_time
+            logger.info(f"Pre-processing completed in {pre_process_time:.2f} seconds")
             
-            # Store min/max strike
-            self.min_strike = df['strike'].min()
-            self.max_strike = df['strike'].max()
+            # Perform 2D interpolation
+            start_time = time.time()
+            logger.info("Performing 2D interpolation")
+            self.interpolate_missing_values_2d()
+            interpolate_time = time.time() - start_time
+            logger.info(f"Interpolation completed in {interpolate_time:.2f} seconds")
             
-            # Create xarray dataset more efficiently
-            strikes = sorted(df['strike'].unique())
-            dtes = sorted(df['DTE'].unique())
-            option_types = ['call', 'put']
+            # Post-process the data
+            start_time = time.time()
+            self.post_process_data()
+            post_process_time = time.time() - start_time
+            logger.info(f"Post-processing completed in {post_process_time:.2f} seconds")
             
-            # Only include necessary columns in the dataset
-            numeric_cols = [
-                'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
-                'openInterest', 'impliedVolatility', 'inTheMoney', 'strike',
-                'mid_price', 'price', 'intrinsic_value', 'extrinsic_value'
-            ]
-            numeric_cols = [col for col in numeric_cols if col in df.columns]
-            
-            string_cols = ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
-            string_cols = [col for col in string_cols if col in df.columns]
-            
-            # Create dataset with optimized memory usage
-            data_vars = {}
-            
-            # Ensure we have at least one DTE value
-            if not dtes:
-                logger.error("No DTE values found in the data")
-                dtes = [0]  # Default to 0 days to expiration
-            
-            # Ensure we have at least one strike value
-            if not strikes:
-                logger.error("No strike values found in the data")
-                strikes = [self.current_price]  # Default to current price
-            
-            for col in numeric_cols:
-                # Skip 'strike' as it should only be a coordinate
-                if col != 'strike':
-                    data_vars[col] = (['strike', 'DTE', 'option_type'], 
-                                    np.full((len(strikes), len(dtes), len(option_types)), np.nan, dtype=np.float32))
-            
-            for col in string_cols:
-                data_vars[col] = (['strike', 'DTE', 'option_type'], 
-                                 np.full((len(strikes), len(dtes), len(option_types)), None, dtype=object))
-            
-            ds = xr.Dataset(
-                data_vars=data_vars, 
-                coords={
-                    'strike': strikes, 
-                    'DTE': dtes, 
-                    'option_type': option_types
-                }
-            )
-            
-            # Add expiration dates
-            try:
-                # Create a mapping of DTE to expiration date
-                dte_to_exp = {}
-                for dte in dtes:
-                    dte_df = df[df['DTE'] == dte]
-                    if not dte_df.empty:
-                        dte_to_exp[dte] = dte_df['expiration'].iloc[0]
-                    else:
-                        # If no data for this DTE, use a default date
-                        dte_to_exp[dte] = pd.Timestamp.now() + pd.Timedelta(days=dte)
-                
-                # Add expiration dates to coordinates
-                ds.coords['expiration'] = ('DTE', np.array([dte_to_exp[dte] for dte in dtes], dtype='datetime64[ns]'))
-            except Exception as e:
-                logger.error(f"Error adding expiration dates to dataset: {str(e)}")
-                # Add a default expiration date if we couldn't add the real ones
-                default_dates = [pd.Timestamp.now() + pd.Timedelta(days=dte) for dte in dtes]
-                ds.coords['expiration'] = ('DTE', np.array(default_dates, dtype='datetime64[ns]'))
-            
-            # Fill the dataset more efficiently
-            for opt_type in option_types:
-                opt_df = df[df['option_type'] == opt_type]
-                for dte in dtes:
-                    dte_df = opt_df[opt_df['DTE'] == dte]
-                    if dte_df.empty:
-                        continue
-                        
-                    for _, row in dte_df.iterrows():
-                        strike = row['strike']
-                        # Check if strike exists in the dataset coordinates
-                        if strike not in ds.coords['strike'].values:
-                            logger.warning(f"Strike {strike} not found in dataset coordinates, skipping")
-                            continue
-                        # Check if DTE exists in the dataset coordinates
-                        if dte not in ds.coords['DTE'].values:
-                            logger.warning(f"DTE {dte} not found in dataset coordinates, skipping")
-                            continue
-                        
-                        try:
-                            for col in numeric_cols:
-                                if col != 'strike':  # Skip strike as it's a coordinate
-                                    ds[col].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = row[col]
-                            for col in string_cols:
-                                if col in row:
-                                    ds[col].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = str(row[col])
-                        except KeyError as e:
-                            logger.error(f"KeyError when setting data: {e}")
-                            logger.error(f"Dataset dimensions: {list(ds.dims)}")
-                            logger.error(f"Dataset coordinates: {list(ds.coords)}")
-                            logger.error(f"Trying to set strike={strike}, DTE={dte}, option_type={opt_type}")
-                            # Try to recover by ensuring all dimensions exist
-                            if 'strike' not in ds.dims:
-                                logger.warning("Adding missing 'strike' dimension")
-                                ds = ds.expand_dims({'strike': strikes})
-                            if 'DTE' not in ds.dims:
-                                logger.warning("Adding missing 'DTE' dimension")
-                                ds = ds.expand_dims({'DTE': dtes})
-                            if 'option_type' not in ds.dims:
-                                logger.warning("Adding missing 'option_type' dimension")
-                                ds = ds.expand_dims({'option_type': option_types})
+            # Store processed data for caching
+            self.options_data = {
+                'dataset': self.ds,
+                'min_strike': self.min_strike,
+                'max_strike': self.max_strike,
+                'risk_free_rate': self.risk_free_rate
+            }
             
             logger.info("Successfully processed options data into xarray Dataset")
-            return ds
         except Exception as e:
-            logger.error(f"Error in pre_process_data: {str(e)}")
+            logger.error(f"Error processing options data: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return None
+            raise
 
     def interpolate_missing_values_1d(self):
         """
@@ -2001,3 +1870,157 @@ class OptionsDataProcessor:
         self.compute_rho()
         
         logger.info("Completed numerical computation of all Greeks")
+
+    def _clean_dataframe(self, df):
+        """Clean up column names and data types in the DataFrame."""
+        try:
+            # Define numeric columns explicitly
+            numeric_cols = [
+                'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
+                'openInterest', 'impliedVolatility', 'inTheMoney', 'strike'
+            ]
+            
+            # Convert to numeric, coercing errors to NaN
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    logger.info(f"Converted {col} to numeric, NaN count: {df[col].isna().sum()}")
+            
+            # Calculate derived values
+            df['mid_price'] = (df['bid'] + df['ask']) / 2
+            df['price'] = df['mid_price']
+            
+            # Calculate intrinsic values efficiently using vectorized operations
+            mask_call = df['option_type'] == 'call'
+            df.loc[mask_call, 'intrinsic_value'] = np.maximum(0, self.current_price - df.loc[mask_call, 'strike'])
+            df.loc[~mask_call, 'intrinsic_value'] = np.maximum(0, df.loc[~mask_call, 'strike'] - self.current_price)
+            df['extrinsic_value'] = df['price'] - df['intrinsic_value']
+            
+            # Store min/max strike
+            self.min_strike = df['strike'].min()
+            self.max_strike = df['strike'].max()
+            
+            return df
+        except Exception as e:
+            logger.error(f"Error cleaning DataFrame: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
+
+    def _convert_to_xarray(self, df):
+        """Convert DataFrame to xarray Dataset."""
+        try:
+            # Create xarray dataset more efficiently
+            strikes = sorted(df['strike'].unique())
+            dtes = sorted(df['DTE'].unique())
+            option_types = ['call', 'put']
+            
+            # Only include necessary columns in the dataset
+            numeric_cols = [
+                'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
+                'openInterest', 'impliedVolatility', 'inTheMoney', 'strike',
+                'mid_price', 'price', 'intrinsic_value', 'extrinsic_value'
+            ]
+            numeric_cols = [col for col in numeric_cols if col in df.columns]
+            
+            string_cols = ['contractSymbol', 'lastTradeDate', 'contractSize', 'currency']
+            string_cols = [col for col in string_cols if col in df.columns]
+            
+            # Create dataset with optimized memory usage
+            data_vars = {}
+            
+            # Ensure we have at least one DTE value
+            if not dtes:
+                logger.error("No DTE values found in the data")
+                dtes = [0]  # Default to 0 days to expiration
+            
+            # Ensure we have at least one strike value
+            if not strikes:
+                logger.error("No strike values found in the data")
+                strikes = [self.current_price]  # Default to current price
+            
+            for col in numeric_cols:
+                # Skip 'strike' as it should only be a coordinate
+                if col != 'strike':
+                    data_vars[col] = (['strike', 'DTE', 'option_type'], 
+                                    np.full((len(strikes), len(dtes), len(option_types)), np.nan, dtype=np.float32))
+            
+            for col in string_cols:
+                data_vars[col] = (['strike', 'DTE', 'option_type'], 
+                                 np.full((len(strikes), len(dtes), len(option_types)), None, dtype=object))
+            
+            ds = xr.Dataset(
+                data_vars=data_vars, 
+                coords={
+                    'strike': strikes, 
+                    'DTE': dtes, 
+                    'option_type': option_types
+                }
+            )
+            
+            # Add expiration dates
+            try:
+                # Create a mapping of DTE to expiration date
+                dte_to_exp = {}
+                for dte in dtes:
+                    dte_df = df[df['DTE'] == dte]
+                    if not dte_df.empty:
+                        dte_to_exp[dte] = dte_df['expiration'].iloc[0]
+                    else:
+                        # If no data for this DTE, use a default date
+                        dte_to_exp[dte] = pd.Timestamp.now() + pd.Timedelta(days=dte)
+                
+                # Add expiration dates to coordinates
+                ds.coords['expiration'] = ('DTE', np.array([dte_to_exp[dte] for dte in dtes], dtype='datetime64[ns]'))
+            except Exception as e:
+                logger.error(f"Error adding expiration dates to dataset: {str(e)}")
+                # Add a default expiration date if we couldn't add the real ones
+                default_dates = [pd.Timestamp.now() + pd.Timedelta(days=dte) for dte in dtes]
+                ds.coords['expiration'] = ('DTE', np.array(default_dates, dtype='datetime64[ns]'))
+            
+            # Fill the dataset more efficiently
+            for opt_type in option_types:
+                opt_df = df[df['option_type'] == opt_type]
+                for dte in dtes:
+                    dte_df = opt_df[opt_df['DTE'] == dte]
+                    if dte_df.empty:
+                        continue
+                        
+                    for _, row in dte_df.iterrows():
+                        strike = row['strike']
+                        # Check if strike exists in the dataset coordinates
+                        if strike not in ds.coords['strike'].values:
+                            logger.warning(f"Strike {strike} not found in dataset coordinates, skipping")
+                            continue
+                        # Check if DTE exists in the dataset coordinates
+                        if dte not in ds.coords['DTE'].values:
+                            logger.warning(f"DTE {dte} not found in dataset coordinates, skipping")
+                            continue
+                        
+                        try:
+                            for col in numeric_cols:
+                                if col != 'strike':  # Skip strike as it's a coordinate
+                                    ds[col].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = row[col]
+                            for col in string_cols:
+                                if col in row:
+                                    ds[col].loc[{'strike': strike, 'DTE': dte, 'option_type': opt_type}] = str(row[col])
+                        except KeyError as e:
+                            logger.error(f"KeyError when setting data: {e}")
+                            logger.error(f"Dataset dimensions: {list(ds.dims)}")
+                            logger.error(f"Dataset coordinates: {list(ds.coords)}")
+                            logger.error(f"Trying to set strike={strike}, DTE={dte}, option_type={opt_type}")
+                            # Try to recover by ensuring all dimensions exist
+                            if 'strike' not in ds.dims:
+                                logger.warning("Adding missing 'strike' dimension")
+                                ds = ds.expand_dims({'strike': strikes})
+                            if 'DTE' not in ds.dims:
+                                logger.warning("Adding missing 'DTE' dimension")
+                                ds = ds.expand_dims({'DTE': dtes})
+                            if 'option_type' not in ds.dims:
+                                logger.warning("Adding missing 'option_type' dimension")
+                                ds = ds.expand_dims({'option_type': option_types})
+            
+            return ds
+        except Exception as e:
+            logger.error(f"Error converting to xarray: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise

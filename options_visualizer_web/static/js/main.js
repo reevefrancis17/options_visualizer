@@ -3,21 +3,18 @@
 // Field mapping for plot display (matches the Python backend)
 const FIELD_MAPPING = {
     "Price": "mid_price",
-    "Bid": "bid",
-    "Ask": "ask",
-    "Volume": "volume",
-    "Intrinsic Value": "intrinsic_value",
-    "Extrinsic Value": "extrinsic_value",
     "Delta": "delta",
     "Gamma": "gamma",
     "Theta": "theta",
-    "Vega": "vega",
-    "Rho": "rho",
-    "IV": "impliedVolatility"
+    "IV": "impliedVolatility",
+    "Volume": "volume",
+    "Spread": "spread",
+    "Intrinsic Value": "intrinsic_value",
+    "Extrinsic Value": "extrinsic_value"
 };
 
 // Price-related fields that need dollar formatting
-const PRICE_FIELDS = ["Price", "Bid", "Ask", "Intrinsic Value", "Extrinsic Value"];
+const PRICE_FIELDS = ["Price", "Spread", "Intrinsic Value", "Extrinsic Value"];
 
 // Global state
 const state = {
@@ -90,8 +87,8 @@ function init() {
     });
     
     // Load default ticker (SPY)
-    elements.ticker.value = 'SPY';
-    console.log("Starting initial search for SPY...");
+    elements.ticker.value = CONFIG.DEFAULT_TICKER;
+    console.log(`Starting initial search for ${CONFIG.DEFAULT_TICKER}...`);
     searchTicker();
 }
 
@@ -124,63 +121,25 @@ function searchTicker() {
 function fetchOptionsData(ticker, isPolling = false) {
     console.log(`Fetching options data for ${ticker}, polling: ${isPolling}`);
     
-    // Update UI state
-    elements.searchBtn.disabled = true;
-    if (!isPolling) {
-        elements.statusLabel.textContent = `Loading ${ticker} data...`;
-        elements.statusLabel.className = 'status-loading';
-        hideError();
-    }
+    // Log the URL we're fetching from
+    const url = `${CONFIG.BACKEND_URL}/api/options/${ticker}`;
+    console.log(`Fetching from URL: ${url}`);
     
-    // Create a timeout promise
-    const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Request timed out')), 30000); // 30 second timeout
-    });
-    
-    // Use the backend API directly with timeout
-    Promise.race([
-        fetch(`${CONFIG.BACKEND_URL}/api/options/${ticker}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        }),
-        timeoutPromise
-    ])
+    // Use the backend API directly
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
     .then(response => {
+        console.log(`Response status: ${response.status}`);
         if (!response.ok) {
-            // Check the content type to handle HTML errors gracefully
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('text/html')) {
-                // Handle HTML response (likely an error page)
-                return response.text().then(html => {
-                    console.error(`Received HTML response instead of JSON: ${html.substring(0, 100)}...`);
-                    throw new Error(`Server returned HTML instead of JSON. The server might be down or misconfigured.`);
-                });
-            }
-            
-            // Try to parse as JSON for structured error
             return response.json().then(data => {
-                throw new Error(data.error || data.message || `Failed to fetch data for ${ticker}`);
-            }).catch(e => {
-                // If JSON parsing fails, throw the original HTTP error
-                if (e.message.includes('JSON')) {
-                    throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
-                }
-                throw e;
+                console.error(`Error response data:`, data);
+                throw new Error(data.error || `Failed to fetch data for ${ticker}`);
             });
         }
-        
-        // Check content type to ensure we're getting JSON
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            console.error(`Unexpected content type: ${contentType}`);
-            return response.text().then(text => {
-                console.error(`Non-JSON response: ${text.substring(0, 100)}...`);
-                throw new Error(`Server returned non-JSON response. Expected JSON but got ${contentType || 'unknown content type'}.`);
-            });
-        }
-        
         return response.json();
     })
     .then(data => {
@@ -190,10 +149,9 @@ function fetchOptionsData(ticker, isPolling = false) {
         elements.searchBtn.disabled = false;
         
         if (data.status === 'loading') {
+            console.log(`Data for ${ticker} is still loading, progress: ${data.progress}`);
             // Data is still loading, start polling
-            const progress = Math.round(data.progress * 100) || 0;
-            elements.statusLabel.textContent = `Loading ${ticker} data... (${progress}%)`;
-            elements.statusLabel.className = 'status-loading';
+            elements.statusLabel.textContent = `Loading ${ticker} data... (${Math.round(data.progress || 0)}%)`;
             if (!isPolling) {
                 startPolling(ticker);
             }
@@ -208,17 +166,51 @@ function fetchOptionsData(ticker, isPolling = false) {
         // Process the data
         state.symbol = ticker;
         state.currentPrice = data.current_price;
-        state.expiryDates = data.expiry_dates || [];
-        state.optionsData = data.options_data || [];
+        
+        // Format expiry dates consistently
+        state.expiryDates = (data.expiry_dates || []).map(date => {
+            // Check if the date is already a string in YYYY-MM-DD format
+            if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return date;
+            }
+            // If it's a timestamp or other format, convert to YYYY-MM-DD
+            return new Date(date).toISOString().split('T')[0];
+        });
+        
+        // Process options data to ensure consistent date format
+        state.optionsData = (data.options_data || []).map(item => {
+            // Create a new object to avoid modifying the original
+            const newItem = {...item};
+            
+            // Ensure expiration is in YYYY-MM-DD format
+            if (newItem.expiration) {
+                if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
+                    // Already in the correct format
+                } else {
+                    // Convert to YYYY-MM-DD
+                    newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
+                }
+            }
+            
+            return newItem;
+        });
+        
         state.lastUpdateTime = new Date();
         state.lastProcessedDates = data.processed_dates || 0;
         state.totalDates = data.total_dates || 0;
+        
+        console.log(`Processed data for ${ticker}:`, {
+            currentPrice: state.currentPrice,
+            expiryDates: state.expiryDates.length,
+            optionsData: state.optionsData.length,
+            lastProcessedDates: state.lastProcessedDates,
+            totalDates: state.totalDates
+        });
         
         // Update status label
         if (data.status === 'partial') {
             const percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
             elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
-            elements.statusLabel.className = 'status-partial';
             
             // Start polling for updates if not already polling
             if (!isPolling) {
@@ -226,7 +218,6 @@ function fetchOptionsData(ticker, isPolling = false) {
             }
         } else {
             elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
-            elements.statusLabel.className = 'status-complete';
         }
         
         // Reset expiry index if needed
@@ -244,119 +235,29 @@ function fetchOptionsData(ticker, isPolling = false) {
         console.error(`Error fetching data for ${ticker}:`, error);
         elements.searchBtn.disabled = false;
         elements.statusLabel.textContent = `Error loading ${ticker} data`;
-        elements.statusLabel.className = 'status-error';
-        showError(error.message || 'Network error occurred');
-        
-        // Don't stop polling on first error if we're already polling
-        if (!isPolling) {
-            startPolling(ticker); // Start polling to retry
-        }
+        showError(error.message);
+        stopPolling();
     });
 }
 
-// Start polling for more data
+// Start polling for updates
 function startPolling(ticker) {
-    state.isPolling = true;
     console.log(`Starting polling for ${ticker}`);
+    state.isPolling = true;
     
-    // Clear any existing interval
+    // Clear any existing polling interval
     if (state.pollingInterval) {
         clearInterval(state.pollingInterval);
     }
     
-    // Track retry attempts and backoff
-    let retryCount = 0;
-    const maxRetries = 5;
-    const baseDelay = 2000; // Start with 2 seconds
-    
-    // Poll with exponential backoff on errors
+    // Set up new polling interval (every 5 seconds)
     state.pollingInterval = setInterval(() => {
-        // If we've loaded all dates, stop polling
-        if (state.lastProcessedDates >= state.totalDates && state.totalDates > 0) {
-            console.log(`Polling complete for ${ticker}: all ${state.totalDates} dates processed`);
-            stopPolling();
-            return;
-        }
-        
-        // If we've exceeded max retries, stop polling
-        if (retryCount >= maxRetries) {
-            console.error(`Exceeded maximum retry attempts (${maxRetries}) for ${ticker}`);
-            stopPolling();
-            showError(`Failed to load complete data for ${ticker} after multiple attempts. Please try again later.`);
-            return;
-        }
-        
-        // Fetch data with error handling
-        fetch(`${CONFIG.BACKEND_URL}/api/options/${ticker}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(data => {
-                    throw new Error(data.error || `Failed to fetch data for ${ticker}`);
-                });
-            }
-            // Reset retry count on successful response
-            retryCount = 0;
-            return response.json();
-        })
-        .then(data => {
-            console.log(`Polling received data for ${ticker}:`, data);
-            
-            if (data.status === 'loading') {
-                // Data is still loading
-                elements.statusLabel.textContent = `Loading ${ticker} data... (${Math.round(data.progress || 0)}%)`;
-                return;
-            }
-            
-            // Process the data
-            state.symbol = ticker;
-            state.currentPrice = data.current_price;
-            state.expiryDates = data.expiry_dates || [];
-            state.optionsData = data.options_data || [];
-            state.lastUpdateTime = new Date();
-            state.lastProcessedDates = data.processed_dates || 0;
-            state.totalDates = data.total_dates || 0;
-            
-            // Update status label
-            if (data.status === 'partial') {
-                const percent = Math.round((state.lastProcessedDates / state.totalDates) * 100);
-                elements.statusLabel.textContent = `Partial data for ${ticker} (${percent}% complete)`;
-            } else {
-                elements.statusLabel.textContent = `${ticker} data updated at ${state.lastUpdateTime.toLocaleTimeString()}`;
-                stopPolling(); // Stop polling if we have complete data
-            }
-            
-            // Reset expiry index if needed
-            if (state.currentExpiryIndex >= state.expiryDates.length) {
-                state.currentExpiryIndex = 0;
-            }
-            
-            // Update navigation buttons
-            updateExpiryDisplay();
-            
-            // Update the plot
-            updatePlot();
-        })
-        .catch(error => {
-            console.error(`Error during polling for ${ticker}:`, error);
-            retryCount++;
-            
-            // Update status to show retry attempt
-            elements.statusLabel.textContent = `Error loading ${ticker} data. Retry ${retryCount}/${maxRetries}...`;
-            
-            // Don't show error message for retries to avoid UI clutter
-            if (retryCount >= maxRetries) {
-                showError(`Failed to load data for ${ticker}: ${error.message}`);
-            }
-        });
-    }, baseDelay);
+        console.log(`Polling for ${ticker} updates...`);
+        fetchOptionsData(ticker, true);
+    }, CONFIG.POLLING_INTERVAL);
 }
 
-// Stop polling
+// Stop polling for updates
 function stopPolling() {
     console.log("Stopping polling");
     state.isPolling = false;
@@ -365,8 +266,6 @@ function stopPolling() {
         clearInterval(state.pollingInterval);
         state.pollingInterval = null;
     }
-    
-    elements.searchBtn.disabled = false;
 }
 
 // Update the expiry date display and navigation buttons
@@ -409,156 +308,141 @@ function nextExpiry() {
 // Update the plot with current data
 function updatePlot() {
     try {
+        console.log("Updating plot with current data");
+        console.log("State:", {
+            optionsData: state.optionsData ? state.optionsData.length : 0,
+            expiryDates: state.expiryDates ? state.expiryDates.length : 0,
+            currentExpiryIndex: state.currentExpiryIndex,
+            currentPrice: state.currentPrice
+        });
+        
         if (!state.optionsData || state.optionsData.length === 0 || !state.expiryDates || state.expiryDates.length === 0) {
             console.warn("No data to plot");
             return;
         }
-
+        
         const selectedPlotType = Array.from(elements.plotOptions).find(option => option.checked).value;
         const plotField = FIELD_MAPPING[selectedPlotType];
+        console.log(`Selected plot type: ${selectedPlotType}, field: ${plotField}`);
+        
+        // Get current date
         const currentDate = state.expiryDates[state.currentExpiryIndex];
+        console.log(`Current expiry date: ${currentDate}`);
+        
+        // Filter data for current expiry date
         const filteredData = state.optionsData.filter(item => item.expiration === currentDate);
-        const calls = filteredData.filter(item => item.option_type === 'call').sort((a, b) => a.strike - b.strike);
-        const puts = filteredData.filter(item => item.option_type === 'put').sort((a, b) => a.strike - b.strike);
-
-        // Calculate ATM strike
-        const strikes = [...new Set(filteredData.map(item => item.strike))].sort((a, b) => a - b);
-        const atm_strike = strikes.reduce((prev, curr) => 
-            Math.abs(curr - state.currentPrice) < Math.abs(prev - state.currentPrice) ? curr : prev, strikes[0]);
-
-        // Calculate yMin and yMax to handle negative values
-        const yValues = [...calls.map(item => item[plotField]), ...puts.map(item => item[plotField])]
-            .filter(y => y != null && !isNaN(y));
+        console.log(`Filtered data for ${currentDate}: ${filteredData.length} items`);
         
-        let yMin = 0;
-        let yMax = 1;
+        // Separate calls and puts
+        const calls = filteredData.filter(item => item.option_type === 'call');
+        const puts = filteredData.filter(item => item.option_type === 'put');
+        console.log(`Calls: ${calls.length}, Puts: ${puts.length}`);
         
-        if (yValues.length > 0) {
-            const minValue = Math.min(...yValues);
-            const maxValue = Math.max(...yValues);
-            
-            // If we have negative values, set yMin to include them with some padding
-            if (minValue < 0) {
-                yMin = minValue * 1.1; // Add 10% padding below the minimum
-            }
-            
-            // Set yMax with padding
-            yMax = maxValue * 1.1; // Add 10% padding above the maximum
-            
-            // Ensure there's always some vertical space even with small ranges
-            if (yMax - yMin < 0.1) {
-                const padding = 0.05;
-                yMin -= padding;
-                yMax += padding;
-            }
+        // Sort by strike price
+        calls.sort((a, b) => a.strike - b.strike);
+        puts.sort((a, b) => a.strike - b.strike);
+        
+        // Process data based on plot type
+        let callValues = calls.map(item => item[plotField]);
+        let putValues = puts.map(item => item[plotField]);
+        
+        // Check for missing or invalid values
+        const callNulls = callValues.filter(v => v === null || v === undefined || isNaN(v)).length;
+        const putNulls = putValues.filter(v => v === null || v === undefined || isNaN(v)).length;
+        console.log(`Call values: ${callValues.length} (${callNulls} null/undefined/NaN)`);
+        console.log(`Put values: ${putValues.length} (${putNulls} null/undefined/NaN)`);
+        
+        // Special handling for IV (convert to percentage)
+        if (selectedPlotType === 'IV') {
+            callValues = callValues.map(val => val !== null ? val * 100 : null);
+            putValues = putValues.map(val => val !== null ? val * 100 : null);
         }
-
-        // Get call and put values at ATM strike
-        const callData = calls.find(item => Math.abs(item.strike - atm_strike) < 0.01);
-        const putData = puts.find(item => Math.abs(item.strike - atm_strike) < 0.01);
         
-        // Format values with appropriate sign for negative numbers
-        const formatValue = (value, isPrice) => {
-            if (value == null || isNaN(value)) return 'N/A';
-            
-            const prefix = isPrice ? '$' : '';
-            const sign = value < 0 ? '-' : '';
-            const absValue = Math.abs(value);
-            
-            if (Number.isInteger(absValue)) {
-                return `${sign}${prefix}${absValue}`;
-            } else {
-                return `${sign}${prefix}${absValue.toFixed(2)}`;
-            }
-        };
-        
-        const callValue = callData && callData[plotField] != null && !isNaN(callData[plotField]) ?
-            formatValue(callData[plotField], PRICE_FIELDS.includes(selectedPlotType)) : 'N/A';
-            
-        const putValue = putData && putData[plotField] != null && !isNaN(putData[plotField]) ?
-            formatValue(putData[plotField], PRICE_FIELDS.includes(selectedPlotType)) : 'N/A';
-
-        // Define traces with initial values
+        // Prepare data for plotting - always use 'lines' mode for all plot types
         const callTrace = {
             x: calls.map(item => item.strike),
-            y: calls.map(item => item[plotField]),
-            type: 'scatter',
-            mode: 'lines+markers',
-            name: `Calls: ${callValue}`,
-            line: { color: 'blue', width: 2 },
-            marker: { size: 6, color: 'blue' }
-        };
-
-        const putTrace = {
-            x: puts.map(item => item.strike),
-            y: puts.map(item => item[plotField]),
-            type: 'scatter',
-            mode: 'lines+markers',
-            name: `Puts: ${putValue}`,
-            line: { color: 'red', width: 2 },
-            marker: { size: 6, color: 'red' }
-        };
-
-        // Add current price line that spans the full y-axis range
-        const currentPriceLine = {
-            x: [state.currentPrice, state.currentPrice],
-            y: [yMin, yMax],
+            y: callValues,
             type: 'scatter',
             mode: 'lines',
-            name: `Spot: $${state.currentPrice.toFixed(2)}`,
+            name: 'Calls',
+            line: {
+                color: 'blue',
+                width: 2
+            }
+        };
+        
+        const putTrace = {
+            x: puts.map(item => item.strike),
+            y: putValues,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Puts',
+            line: {
+                color: 'red',
+                width: 2
+            }
+        };
+        
+        // Add current price line
+        const currentPriceLine = {
+            x: [state.currentPrice, state.currentPrice],
+            y: [0, Math.max(...callValues.filter(v => v !== null && !isNaN(v) && v !== undefined), 
+                             ...putValues.filter(v => v !== null && !isNaN(v) && v !== undefined)) * 1.1 || 1],
+            type: 'scatter',
+            mode: 'lines',
+            name: `Spot: $${state.currentPrice.toFixed(2)}`, // Changed from "Current Price"
             line: {
                 color: 'green',
                 width: 2,
                 dash: 'dash'
             }
         };
-
-        // Add zero line if we have negative values
-        let zeroLine = null;
-        if (yMin < 0) {
-            zeroLine = {
-                x: [Math.min(...strikes), Math.max(...strikes)],
-                y: [0, 0],
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Zero',
-                line: { color: 'gray', width: 1 },
-                hoverinfo: 'none'
-            };
-        }
-
+        
+        // Add hover line (initially hidden)
         const hoverLine = {
-            x: [atm_strike, atm_strike],
-            y: [yMin, yMax],
+            x: [0, 0],
+            y: [0, 0],
             type: 'scatter',
             mode: 'lines',
-            name: `Strike: $${atm_strike.toFixed(2)}`,
-            line: { color: 'gray', width: 1, dash: 'dot' },
+            name: 'Strike',
+            line: {
+                color: 'gray',
+                width: 1,
+                dash: 'dot'
+            },
             hoverinfo: 'none',
-            visible: true // Initially visible at ATM
+            visible: false
         };
-
+        
+        // Layout configuration
         const layout = {
             title: `${state.symbol} Options - ${selectedPlotType} (${currentDate})`,
-            xaxis: { title: 'Strike Price ($)', tickprefix: '$' },
+            xaxis: {
+                title: 'Strike Price ($)',
+                tickprefix: '$'
+            },
             yaxis: {
-                title: PRICE_FIELDS.includes(selectedPlotType) ? `${selectedPlotType} ($)` : selectedPlotType,
+                title: getYAxisTitle(selectedPlotType),
                 tickprefix: PRICE_FIELDS.includes(selectedPlotType) ? '$' : '',
-                range: [yMin, yMax]
+                tickformat: getTickFormat(selectedPlotType)
             },
             hovermode: 'closest',
             showlegend: true,
-            legend: { x: 0, y: 1 },
-            margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 }
+            legend: {
+                x: 0,
+                y: 1
+            },
+            margin: {
+                l: 50,
+                r: 50,
+                b: 50,
+                t: 50,
+                pad: 4
+            }
         };
-
+        
         // Create or update the plot
         const plotData = [callTrace, putTrace, currentPriceLine, hoverLine];
-        
-        // Add zero line if we have negative values
-        if (zeroLine) {
-            plotData.push(zeroLine);
-        }
 
         if (!state.plot) {
             // Create new plot
@@ -713,42 +597,142 @@ function hideError() {
     }
 }
 
-// Update hover line and information
+// Update hover line
 function updateHoverLine(strike) {
     try {
         const plotDiv = document.getElementById('options-plot');
-        if (!plotDiv || !plotDiv.data) return;
-
+        if (!plotDiv || !plotDiv.data) {
+            return;
+        }
+        
+        const plotData = plotDiv.data;
         const selectedPlotType = Array.from(elements.plotOptions).find(option => option.checked).value;
         const plotField = FIELD_MAPPING[selectedPlotType];
+        
+        // Get current date
         const currentDate = state.expiryDates[state.currentExpiryIndex];
+        
+        // Filter data for current expiry date
         const filteredData = state.optionsData.filter(item => item.expiration === currentDate);
+        
+        // Separate calls and puts
         const calls = filteredData.filter(item => item.option_type === 'call');
         const puts = filteredData.filter(item => item.option_type === 'put');
-
+        
+        // Find the call and put values at this strike
         const callData = calls.find(item => Math.abs(item.strike - strike) < 0.01);
         const putData = puts.find(item => Math.abs(item.strike - strike) < 0.01);
-        const callValue = callData && callData[plotField] != null && !isNaN(callData[plotField]) ?
-            (PRICE_FIELDS.includes(selectedPlotType) ? `$${callData[plotField].toFixed(2)}` :
-            (Number.isInteger(callData[plotField]) ? callData[plotField].toString() : callData[plotField].toFixed(2))) : 'N/A';
-        const putValue = putData && putData[plotField] != null && !isNaN(putData[plotField]) ?
-            (PRICE_FIELDS.includes(selectedPlotType) ? `$${putData[plotField].toFixed(2)}` :
-            (Number.isInteger(putData[plotField]) ? putData[plotField].toString() : putData[plotField].toFixed(2))) : 'N/A';
-
-        const yMax = Math.max(...calls.map(item => item[plotField] || 0), ...puts.map(item => item[plotField] || 0)) * 1.1;
-
-        Plotly.restyle('options-plot', {
-            name: [`Calls: ${callValue}`, `Puts: ${putValue}`]
-        }, [0, 1]);
-
-        Plotly.restyle('options-plot', {
-            x: [[strike, strike]],
-            y: [[0, yMax]],
-            name: [`Strike: $${strike.toFixed(2)}`],
-            visible: [true]
-        }, [3]);
+        
+        // Format values based on plot type
+        function formatValue(value) {
+            if (value == null || isNaN(value)) return 'N/A';
+            
+            switch(selectedPlotType) {
+                case 'IV':
+                    return `${(value * 100).toFixed(1)}%`;
+                case 'Delta':
+                case 'Gamma':
+                case 'Theta':
+                    return value.toFixed(4);
+                case 'Volume':
+                    return value.toLocaleString();
+                case 'Price':
+                case 'Spread':
+                case 'Intrinsic Value':
+                case 'Extrinsic Value':
+                    return `$${value.toFixed(2)}`;
+                default:
+                    return Number.isInteger(value) ? value.toString() : value.toFixed(2);
+            }
+        }
+        
+        // Update trace names with values
+        if (callData) {
+            plotData[0].name = `Calls: ${formatValue(callData[plotField])}`;
+        } else {
+            plotData[0].name = 'Calls: N/A';
+        }
+        
+        if (putData) {
+            plotData[1].name = `Puts: ${formatValue(putData[plotField])}`;
+        } else {
+            plotData[1].name = 'Puts: N/A';
+        }
+        
+        // Update strike line
+        plotData[3].name = `Strike: $${strike.toFixed(2)}`;
+        plotData[3].x = [strike, strike];
+        plotData[3].visible = true;
+        
+        // Get y-axis range
+        let yValues = [];
+        if (selectedPlotType === 'IV') {
+            // For IV, we need to multiply by 100 to match the display
+            yValues = [...calls.map(item => item[plotField] * 100), ...puts.map(item => item[plotField] * 100)]
+                .filter(y => y != null && !isNaN(y));
+        } else {
+            yValues = [...calls.map(item => item[plotField]), ...puts.map(item => item[plotField])]
+                .filter(y => y != null && !isNaN(y));
+        }
+        
+        const yMax = Math.max(...yValues) * 1.1 || 1;
+        plotData[3].y = [0, yMax];
+        
+        // Track if we're currently hovering
+        state.isHovering = strike !== findAtmStrike(calls, puts, state.currentPrice);
+        
+        Plotly.redraw('options-plot')
+            .catch(err => {
+                console.error("Error redrawing plot:", err);
+            });
     } catch (error) {
         console.error('Error updating hover line:', error);
+    }
+}
+
+// Helper functions for plot formatting
+function getYAxisTitle(plotType) {
+    switch(plotType) {
+        case 'Price':
+            return 'Option Price ($)';
+        case 'Delta':
+            return 'Delta (Δ)';
+        case 'Gamma':
+            return 'Gamma (Γ)';
+        case 'Theta':
+            return 'Theta (Θ) - Daily';
+        case 'IV':
+            return 'Implied Volatility (%)';
+        case 'Volume':
+            return 'Trading Volume';
+        case 'Spread':
+            return 'Bid-Ask Spread ($)';
+        case 'Intrinsic Value':
+            return 'Intrinsic Value ($)';
+        case 'Extrinsic Value':
+            return 'Extrinsic Value ($)';
+        default:
+            return plotType;
+    }
+}
+
+function getTickFormat(plotType) {
+    switch(plotType) {
+        case 'IV':
+            return '.1%';  // Format as percentage with 1 decimal place
+        case 'Delta':
+        case 'Gamma':
+        case 'Theta':
+            return '.4f';  // Format with 4 decimal places
+        case 'Volume':
+            return ',d';   // Format as integer with commas
+        case 'Price':
+        case 'Spread':
+        case 'Intrinsic Value':
+        case 'Extrinsic Value':
+            return '.2f';  // Format with 2 decimal places
+        default:
+            return '';
     }
 }
 
