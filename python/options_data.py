@@ -117,7 +117,7 @@ class OptionsDataManager:
         cached_data = self._cache.get(ticker)
         
         if cached_data:
-            options_data, price, timestamp, expiry, processed_dates, total_dates = cached_data
+            options_data, price, timestamp, progress, processed_dates, total_dates = cached_data
             
             # Calculate age of cache - ensure timestamp is a float
             try:
@@ -130,27 +130,28 @@ class OptionsDataManager:
             # Calculate progress
             progress = processed_dates / max(total_dates, 1) if total_dates > 0 else 1.0
             
-            # Check if cache is still valid
-            if age < self.cache_duration:
+            # Create processor from cache regardless of age
+            try:
                 # Check if the data is fully interpolated
                 is_fully_interpolated = options_data.get('_is_fully_interpolated', False) if isinstance(options_data, dict) else False
                 
-                # Create processor from cache
-                try:
-                    # If we're still loading and the cache is not fully interpolated, mark as partial
-                    if is_loading and not is_fully_interpolated:
-                        status = 'partial'
+                # If we're still loading and the cache is not fully interpolated, mark as partial
+                if is_loading and not is_fully_interpolated:
+                    status = 'partial'
+                else:
+                    # If cache is stale but we're not already refreshing, trigger a background refresh
+                    if age >= self.cache_duration and not is_loading:
+                        logger.info(f"Cache for {ticker} is stale (age: {age:.1f}s), triggering background refresh")
+                        self.start_fetching(ticker, skip_interpolation=False)
+                        status = 'partial'  # Mark as partial since we're refreshing
                     else:
                         status = 'complete'
-                        
-                    # Create processor from cache
-                    processor = OptionsDataProcessor(options_data, price, is_processed=True)
-                    return processor, price, status, progress
-                except Exception as e:
-                    logger.error(f"Error creating processor from cache for {ticker}: {str(e)}")
-                    # Fall through to loading or not found
-            else:
-                logger.info(f"Cache for {ticker} is expired (age: {age:.1f}s)")
+                
+                # Create processor from cache
+                processor = OptionsDataProcessor(options_data, price, is_processed=True)
+                return processor, price, status, progress
+            except Exception as e:
+                logger.error(f"Error creating processor from cache for {ticker}: {str(e)}")
                 # Fall through to loading or not found
         
         # If we're loading, return loading status
@@ -162,8 +163,10 @@ class OptionsDataManager:
             
             return None, None, 'loading', progress
         
-        # Not in cache and not loading
-        return None, None, 'not_found', 0.0
+        # Not in cache and not loading, start fetching
+        logger.info(f"No cached data for {ticker}, starting fetch")
+        self.start_fetching(ticker, skip_interpolation=False)
+        return None, None, 'loading', 0.0
 
     def start_fetching(self, ticker: str, skip_interpolation: bool = False) -> bool:
         """Start fetching options data for a ticker in the background.
@@ -251,6 +254,7 @@ class OptionsDataManager:
                                 # Mark this as unprocessed data by not including a 'dataset' key
                                 # Add a flag to indicate this is raw data (not interpolated)
                                 raw_data_collection['_is_fully_interpolated'] = False
+                                raw_data_collection['_last_updated'] = time.time()  # Add timestamp for cache age tracking
                                 self._cache.set(ticker, raw_data_collection, current_price, len(raw_data_collection), total_dates)
                                 logger.info(f"Cached raw data for {ticker} with {len(raw_data_collection)}/{total_dates} dates")
                         except Exception as e:
@@ -310,6 +314,7 @@ class OptionsDataManager:
                                 logger.error(f"Processor dataset is None for {ticker}")
                                 # Fall back to caching raw data
                                 raw_data_collection['_is_fully_interpolated'] = False
+                                raw_data_collection['_last_updated'] = time.time()  # Add timestamp for cache age tracking
                                 self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
                                 return
                             
@@ -318,6 +323,7 @@ class OptionsDataManager:
                             
                             # Add a flag to indicate this data is fully interpolated
                             processed_data['_is_fully_interpolated'] = True
+                            processed_data['_last_updated'] = time.time()  # Add timestamp for cache age tracking
                             
                             # Ensure all plot types are calculated and available
                             # This is critical for frontend performance
@@ -340,6 +346,8 @@ class OptionsDataManager:
                                     processor._ensure_all_plot_fields()
                                     processor.apply_floors()
                                     processed_data = processor.options_data
+                                    processed_data['_is_fully_interpolated'] = True
+                                    processed_data['_last_updated'] = time.time()  # Add timestamp for cache age tracking
                             else:
                                 logger.warning(f"Processed data does not have data_vars attribute")
                             
@@ -349,82 +357,30 @@ class OptionsDataManager:
                     except Exception as proc_error:
                         logger.error(f"Error processing complete data for {ticker}: {str(proc_error)}")
                         logger.error(traceback.format_exc())
+                        
                         # Fall back to caching raw data
-                        with self._cache.get_lock(ticker):
-                            raw_data_collection['_is_fully_interpolated'] = False
-                            self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
-                    
-                    logger.info(f"Completed fetching data for {ticker} with {processed_dates} dates")
-                elif isinstance(options_data_dict, dict) and current_price:
-                    # Handle the case where options_data is a dictionary from the API
-                    logger.info(f"Received options data dictionary for {ticker}")
-                    processed_dates = len(options_data_dict)
-                    total_dates = processed_dates  # Assume all dates are processed
-                    
-                    try:
-                        # Process the data with the ticker lock
-                        with self._cache.get_lock(ticker):
-                            # Process the data
-                            processor = OptionsDataProcessor(options_data_dict, current_price,
-                                                            is_processed=False,
-                                                            skip_interpolation=False)  # Always do interpolation for cached data
-                            
-                            # Check if processor has a valid dataset
-                            if processor.ds is None:
-                                logger.error(f"Processor dataset is None for {ticker}")
-                                # Fall back to caching raw data
-                                options_data_dict['_is_fully_interpolated'] = False
-                                self._cache.set(ticker, options_data_dict, current_price, processed_dates, total_dates)
-                                return
-                                
-                            processed_data = processor.options_data
-                            
-                            # Add a flag to indicate this data is fully interpolated
-                            processed_data['_is_fully_interpolated'] = True
-                            
-                            # Update cache with the processed data
-                            self._cache.set(ticker, processed_data, current_price, processed_dates, total_dates)
-                            logger.info(f"Cached processed data for {ticker} with {processed_dates}/{total_dates} dates")
-                    except Exception as proc_error:
-                        logger.error(f"Error processing API data for {ticker}: {str(proc_error)}")
-                        logger.error(traceback.format_exc())
-                        # Fall back to caching raw data
-                        with self._cache.get_lock(ticker):
-                            options_data_dict['_is_fully_interpolated'] = False
-                            self._cache.set(ticker, options_data_dict, current_price, processed_dates, total_dates)
-                elif hasattr(options_data_dict, 'options_data') and current_price:
-                    # Handle the case where options_data is already an OptionsDataProcessor
-                    logger.info(f"Received OptionsDataProcessor for {ticker}")
-                    # Get the number of expiration dates from the processor
-                    try:
-                        with self._cache.get_lock(ticker):
-                            processor = options_data_dict
-                            processed_data = processor.options_data
-                            # Get the number of expiration dates
-                            expiry_dates = processor.get_expirations()
-                            processed_dates = len(expiry_dates) if expiry_dates else 0
-                            total_dates = processed_dates
-                            
-                            # Add a flag to indicate this data is fully interpolated
-                            processed_data['_is_fully_interpolated'] = True
-                            
-                            # Update cache with the processed data
-                            self._cache.set(ticker, processed_data, current_price, processed_dates, total_dates)
-                            logger.info(f"Cached processed data for {ticker} with {processed_dates} dates")
-                    except Exception as proc_error:
-                        logger.error(f"Error processing processor data for {ticker}: {str(proc_error)}")
-                        logger.error(traceback.format_exc())
-                else:
-                    logger.error(f"Failed to fetch data for {ticker}")
+                        try:
+                            with self._cache.get_lock(ticker):
+                                raw_data_collection['_is_fully_interpolated'] = False
+                                raw_data_collection['_last_updated'] = time.time()  # Add timestamp for cache age tracking
+                                self._cache.set(ticker, raw_data_collection, final_current_price, processed_dates, total_dates)
+                                logger.info(f"Cached raw data for {ticker} after processing error")
+                        except Exception as cache_error:
+                            logger.error(f"Error caching raw data after processing error for {ticker}: {str(cache_error)}")
+                
+                # Clean up loading state
+                if ticker in self._loading_state:
+                    del self._loading_state[ticker]
+                
+                logger.info(f"Background fetch for {ticker} completed")
+        
         except Exception as e:
-            logger.error(f"Error fetching data for {ticker} in background: {str(e)}")
-            # Log the full traceback for debugging
+            logger.error(f"Unexpected error in background fetch for {ticker}: {str(e)}")
             logger.error(traceback.format_exc())
-        finally:
+            
             # Clean up loading state
             if ticker in self._loading_state:
                 del self._loading_state[ticker]
-            logger.info(f"Background fetch for {ticker} completed")
 
     def get_options_data(self, ticker: str, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None,
                          max_dates: Optional[int] = None, force_reinterpolate: bool = False) -> Tuple[Optional['OptionsDataProcessor'], Optional[float]]:

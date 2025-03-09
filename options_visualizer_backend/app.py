@@ -148,6 +148,10 @@ def get_options(ticker):
         # Check for query parameters
         dte_min = request.args.get('dte_min', None)
         dte_max = request.args.get('dte_max', None)
+        fields = request.args.get('fields', None)
+        
+        # Get specific fields if requested
+        field_list = fields.split(',') if fields else None
         
         # Skip interpolation is no longer supported - always use 2D interpolation
         skip_interpolation = False
@@ -155,17 +159,17 @@ def get_options(ticker):
         # Get the data manager
         manager = get_data_manager()
         
-        # Get data from cache
+        # Get data from cache or start fetching if not available
+        # The get_current_processor method now handles triggering background refreshes for stale data
         processor, current_price, status, progress = manager.get_current_processor(ticker)
         
-        if status == 'not_found':
-            # Start fetching in background with interpolation enabled
-            manager.start_fetching(ticker, skip_interpolation=skip_interpolation)
+        # If no processor is available yet, it means we're still loading the data
+        if processor is None:
             return jsonify({
                 'status': 'loading',
                 'message': f'Fetching data for {ticker}',
                 'ticker': ticker,
-                'progress': 0
+                'progress': progress
             }), 202  # Accepted
         
         # Get the data frame
@@ -173,7 +177,7 @@ def get_options(ticker):
         
         # If the processor exists but the DataFrame is None or empty, 
         # it means the data is still being processed
-        if processor and (df is None or df.empty):
+        if df is None or df.empty:
             # Data is being processed, return loading status
             return jsonify({
                 'status': 'loading',
@@ -181,13 +185,6 @@ def get_options(ticker):
                 'ticker': ticker,
                 'progress': progress
             }), 202  # Accepted
-        
-        # If we have no data at all, return an error
-        if df is None or df.empty:
-            return jsonify({
-                'status': 'error',
-                'message': f'No options data available for {ticker}'
-            }), 404
         
         # Apply DTE filters if provided
         if dte_min is not None:
@@ -260,6 +257,20 @@ def get_options(ticker):
         else:
             # For smaller datasets, convert all at once
             data_records = df.to_dict(orient='records')
+        
+        # Filter fields if requested
+        if field_list:
+            # Always include these essential fields
+            essential_fields = ['strike', 'expiration', 'option_type', 'DTE']
+            required_fields = list(set(essential_fields + field_list))
+            
+            # Filter the records to only include requested fields
+            filtered_records = []
+            for record in data_records:
+                filtered_record = {k: record.get(k) for k in required_fields if k in record}
+                filtered_records.append(filtered_record)
+            data_records = filtered_records
+            logger.info(f"Filtered response to include only fields: {required_fields}")
         
         # Prepare response
         response = {
