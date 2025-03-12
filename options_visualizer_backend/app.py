@@ -14,18 +14,42 @@ import yfinance as yf
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS
 import traceback
+from logging.handlers import RotatingFileHandler
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Setup logging
 os.makedirs('logs', exist_ok=True)
-logging.basicConfig(
-    filename='logs/server.log',
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+log_file = 'logs/server.log'
+
+# Clear log file on startup
+if os.path.exists(log_file):
+    with open(log_file, 'w') as f:
+        f.write(f"Log file cleared on server startup: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+# Configure rotating file handler (100KB max size, keep 3 backup files)
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=100*1024,  # 100KB
+    backupCount=3
 )
+file_handler.setLevel(logging.WARNING)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.WARNING)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure root logger
+logging.basicConfig(
+    level=logging.WARNING,
+    handlers=[file_handler, console_handler]
+)
+
 logger = logging.getLogger(__name__)
+logger.warning(f"Server started with logging level: WARNING")
 
 # Custom JSON encoder to handle NaN values
 class CustomJSONEncoder(json.JSONEncoder):

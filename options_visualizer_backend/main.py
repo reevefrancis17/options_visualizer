@@ -16,6 +16,8 @@ import webbrowser
 from options_visualizer_web.app import app as frontend_app
 from options_visualizer_backend.app import app as backend_app
 from python.options_data import OptionsDataManager
+from logging.handlers import RotatingFileHandler
+from datetime import datetime
 
 # Initialize the options data manager with a 10-minute cache duration
 # This will be used by both the frontend and backend
@@ -27,12 +29,11 @@ servers_ready = {
     'frontend': False
 }
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Add the parent directory to the path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import the FastAPI app
+from options_visualizer_backend.app import app
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C and other termination signals"""
@@ -120,7 +121,37 @@ def open_browser():
     webbrowser.open(url)
 
 if __name__ == '__main__':
-    logger.info("Starting Options Visualizer from main.py")
+    # Configure logging for uvicorn
+    os.makedirs('logs', exist_ok=True)
+    log_file = 'logs/uvicorn.log'
+    
+    # Clear log file on startup
+    if os.path.exists(log_file):
+        with open(log_file, 'w') as f:
+            f.write(f"Log file cleared on uvicorn startup: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    # Configure rotating file handler (100KB max size, keep 3 backup files)
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=100*1024,  # 100KB
+        backupCount=3
+    )
+    file_handler.setLevel(logging.WARNING)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    # Configure console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.WARNING,
+        handlers=[file_handler, console_handler]
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.warning("Starting uvicorn server with logging level: WARNING")
     
     # Register signal handler
     signal.signal(signal.SIGINT, signal_handler)

@@ -41,11 +41,16 @@ class OptionsCache:
         self._initialize_db()
         self._migrate_db_if_needed()
         
+        # Verify cache integrity on startup
+        self._verify_cache_integrity()
+        
         # Synchronize the cache with the registry (bidirectional)
         self._sync_cache_with_registry()
         
         # Start background polling for cache updates
         self._start_polling()
+        
+        logger.warning(f"Cache initialized at {self.db_path} with {len(self.get_registry_tickers())} registered tickers")
     
     def _get_cache_path(self) -> Path:
         """Get the path to the cache database file."""
@@ -360,6 +365,11 @@ class OptionsCache:
                             now = time.time()
                             age = now - timestamp if timestamp is not None else float('inf')
                             
+                            # Check if the data is fully processed
+                            is_fully_processed = data.get('_is_fully_processed', False)
+                            if is_fully_processed:
+                                logger.info(f"Retrieved fully processed data for {ticker} from cache")
+                            
                             # Check if the data is stale
                             if age > self.cache_duration:
                                 # Trigger a refresh in the background
@@ -398,7 +408,7 @@ class OptionsCache:
         self.refresh_callback = callback
         logger.info("Registered refresh callback")
     
-    def set(self, ticker: str, options_data: Dict, current_price: float, processed_dates: int, total_dates: int):
+    def set(self, ticker: str, options_data: Dict, current_price: float, processed_dates: int, total_dates: int, processed_dataset=None):
         """Store data in the cache.
         
         Args:
@@ -407,6 +417,7 @@ class OptionsCache:
             current_price: The current stock price
             processed_dates: Number of expiration dates processed
             total_dates: Total number of expiration dates
+            processed_dataset: Optional pre-processed xarray Dataset to cache
         """
         # Update the ticker registry - single source of truth
         self.update_registry(ticker)
@@ -417,6 +428,14 @@ class OptionsCache:
                 # Connect to the database
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
+                
+                # Add processed_dataset to options_data if provided
+                is_fully_processed = False
+                if processed_dataset is not None:
+                    # Store a flag indicating this data is fully processed
+                    options_data['_is_fully_processed'] = True
+                    options_data['_processed_dataset'] = processed_dataset
+                    is_fully_processed = True
                 
                 # Serialize and compress the data
                 try:
@@ -441,12 +460,17 @@ class OptionsCache:
                 
                 # Log the size of the data for monitoring
                 data_size_kb = len(data_blob) / 1024
-                logger.info(f"Cached data for {ticker} ({processed_dates}/{total_dates} dates), size: {data_size_kb:.2f} KB")
+                processed_status = "fully processed" if is_fully_processed else "raw"
+                logger.info(f"Cached {processed_status} data for {ticker} ({processed_dates}/{total_dates} dates), size: {data_size_kb:.2f} KB")
         except Exception as e:
             logger.error(f"Error caching data for {ticker}: {str(e)}")
     
     def clear(self, ticker: Optional[str] = None):
-        """Clear the cache for a specific ticker or all tickers."""
+        """Clear the cache for a specific ticker or all tickers.
+        
+        Note: This only removes data from the cache database, not from the registry.
+        Tickers in the registry are preserved to ensure the registry only grows over time.
+        """
         try:
             if ticker:
                 # Use the ticker-specific lock for thread safety
@@ -462,7 +486,7 @@ class OptionsCache:
                     conn.commit()
                     conn.close()
                     
-                    logger.info(f"Cleared cache for {ticker}")
+                    logger.info(f"Cleared cache for {ticker} (ticker remains in registry)")
             else:
                 # Clear all tickers - use the global lock
                 with self.lock:
@@ -477,12 +501,16 @@ class OptionsCache:
                     conn.commit()
                     conn.close()
                     
-                    logger.info("Cleared entire cache")
+                    logger.info("Cleared entire cache (tickers remain in registry)")
         except Exception as e:
             logger.error(f"Error clearing cache: {str(e)}")
     
     def delete(self, ticker: str):
-        """Delete a specific ticker from the cache."""
+        """Delete a specific ticker from the cache.
+        
+        Note: This only removes data from the cache database, not from the registry.
+        The ticker remains in the registry to ensure the registry only grows over time.
+        """
         # Use the ticker-specific lock for thread safety
         with self.get_lock(ticker):
             self.clear(ticker)
@@ -586,4 +614,42 @@ class OptionsCache:
         with self.lock:  # Protect the ticker_locks dictionary
             if ticker not in self.ticker_locks:
                 self.ticker_locks[ticker] = threading.RLock()  # Use RLock to allow reentrant locking
-            return self.ticker_locks[ticker] 
+            return self.ticker_locks[ticker]
+
+    def _verify_cache_integrity(self):
+        """Verify the integrity of the cache database on startup.
+        
+        This ensures the cache is ready for use after a server restart.
+        """
+        try:
+            with self.lock:
+                # Connect to the database
+                conn = sqlite3.connect(str(self.db_path))
+                cursor = conn.cursor()
+                
+                # Check database integrity
+                cursor.execute("PRAGMA integrity_check;")
+                integrity_result = cursor.fetchone()[0]
+                
+                if integrity_result != "ok":
+                    logger.error(f"Cache integrity check failed on startup: {integrity_result}")
+                    self._recover_database()
+                else:
+                    # Count the number of cached tickers
+                    cursor.execute("SELECT COUNT(*) FROM options_cache")
+                    count = cursor.fetchone()[0]
+                    logger.warning(f"Cache integrity verified on startup: {count} cached tickers found")
+                    
+                    # Check for any stale data
+                    now = time.time()
+                    cursor.execute("SELECT COUNT(*) FROM options_cache WHERE timestamp < ?", (now - self.cache_duration,))
+                    stale_count = cursor.fetchone()[0]
+                    if stale_count > 0:
+                        logger.warning(f"Found {stale_count} stale entries in cache that will be refreshed")
+                
+                # Close connection
+                conn.close()
+        except Exception as e:
+            logger.error(f"Error verifying cache integrity on startup: {str(e)}")
+            # Try to recover the database
+            self._recover_database() 

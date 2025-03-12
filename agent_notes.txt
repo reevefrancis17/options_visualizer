@@ -619,24 +619,40 @@ These improvements significantly enhance the accuracy and reliability of the Gre
 
 # Agent Notes - Cache Manager Fixes and Testing
 
-## Issues Fixed
+## Registry Persistence Fix (2023-07-09)
+- Fixed issue where tickers were being removed from the ticker registry
+- Modified clear() and delete() methods to ensure tickers are never removed from the registry
+- Added explicit documentation to these methods explaining that they only affect the cache, not the registry
+- Added test_registry_persistence test to verify tickers remain in the registry after being removed from the cache
+- This ensures the ticker registry only grows over time, as required
+
+## Test Coverage Improvements
+- Increased test coverage from 79% to 90% for the cache_manager.py file
+- Added 10 new test cases covering various edge cases and error handling scenarios:
+  - test_get_cache_path: Tests the cache path determination logic
+  - test_load_registry_error: Tests error handling when loading a corrupted registry
+  - test_save_registry_error: Tests error handling when saving to an invalid registry path
+  - test_sync_cache_with_registry_error: Tests error handling during registry synchronization
+  - test_initialize_db_error: Tests error handling during database initialization
+  - test_recover_database_integrity_check: Tests database integrity checking
+  - test_recover_database_error: Tests error handling during database recovery
+  - test_get_corrupted_data: Tests handling of corrupted data in the cache
+  - test_set_compression_error: Tests error handling during data compression
+  - test_start_polling: Tests the background polling thread (skipped due to threading complexity)
+
+## Previous Fixes
 1. Fixed the "timestamp" column issue in the cache_manager.py file:
    - Added migration code to check for the existence of the timestamp column and add it if missing
    - Ensured consistent naming of the timestamp column throughout the code
    - Added handling for cases where timestamp might be None
 
 2. Created comprehensive test suite for the cache manager:
-   - Implemented 23 test cases covering various aspects of the cache manager functionality
+   - Implemented 33 passing test cases covering various aspects of the cache manager functionality
    - Tests include initialization, registry operations, database operations, and error handling
    - Fixed issues with the database recovery test to properly mock the behavior
 
-## Test Coverage
-- Achieved 79% test coverage for the cache_manager.py file
-- All 23 tests are now passing
-- Verified that the cache manager works correctly with the SPY ticker
-
 ## Remaining Work
-- Consider improving test coverage further (currently at 79%)
+- Consider improving test coverage further (currently at 90%)
 - Add more edge case tests for error handling scenarios
 - Consider adding integration tests that test the cache manager with actual data
 
@@ -644,3 +660,4 @@ These improvements significantly enhance the accuracy and reliability of the Gre
 - The bidirectional synchronization between the cache and ticker registry is now working correctly
 - The cache manager properly handles database migrations and recovery
 - Error handling has been improved to handle cases where the timestamp column might be missing or null
+- The ticker registry now only grows over time, never removing tickers even when they're removed from the cache

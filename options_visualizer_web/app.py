@@ -10,6 +10,7 @@ import pandas as pd
 import math
 from flask_cors import CORS
 import traceback
+from logging.handlers import RotatingFileHandler
 
 # Fix the path modification
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # Points to project root
@@ -18,32 +19,36 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # Points to project
 from python.options_data import OptionsDataManager, OptionsDataProcessor
 
 # Configure logging
-log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug', 'logs')
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+os.makedirs('logs', exist_ok=True)
+log_file = 'logs/web_server.log'
 
-# Clear logs on startup
-log_file = os.path.join(log_dir, 'web_app.log')
+# Clear log file on startup
 if os.path.exists(log_file):
     with open(log_file, 'w') as f:
-        f.write(f"=== New session started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        f.write(f"Log file cleared on web server startup: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-# Configure console handler in addition to file handler
+# Configure rotating file handler (100KB max size, keep 3 backup files)
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=100*1024,  # 100KB
+    backupCount=3
+)
+file_handler.setLevel(logging.WARNING)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure console handler
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(console_format)
-
-file_handler = logging.FileHandler(log_file)
-file_handler.setLevel(logging.INFO)
-file_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(file_format)
+console_handler.setLevel(logging.WARNING)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 # Configure root logger
-logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
+logging.basicConfig(
+    level=logging.WARNING,
+    handlers=[file_handler, console_handler]
+)
 
 logger = logging.getLogger(__name__)
-logger.info("Starting Options Visualizer Web App")
+logger.warning(f"Web server started with logging level: WARNING")
 
 # Custom JSON encoder to handle NaN values
 class CustomJSONEncoder(json.JSONEncoder):

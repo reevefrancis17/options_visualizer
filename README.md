@@ -6,6 +6,7 @@ A web application for visualizing stock options data fetched from Yahoo Finance.
 - Navigate through different expiration dates
 - Track values at specific strike prices with interactive crosshairs
 - Compare intrinsic and extrinsic option values
+- Automatically track and cache frequently accessed tickers
 
 ## Project Structure
 
@@ -21,6 +22,7 @@ options_visualizer/
 │   │   └── yahoo_finance.py   # Yahoo Finance data fetching
 │   ├── cache/                 # Cached data storage
 │   ├── data/                  # Data storage and processing
+│   │   └── ticker_registry.json # Persistent registry of all tickers
 │   ├── utils/                 # Utility functions
 │   └── app.py                 # Backend Flask API server
 ├── python/                    # Shared utilities
@@ -29,6 +31,24 @@ options_visualizer/
 │   └── options_preprocessor.py # Data preprocessing utilities
 └── README.md                  # This file
 ```
+
+## Ticker Registry and Caching System
+
+The application includes a sophisticated ticker registry and caching system:
+
+- **Persistent Ticker Registry**: All tickers ever accessed are stored in `data/ticker_registry.json`
+  - The registry only grows over time, never removing tickers
+  - Tracks first access time, last access time, and access count for each ticker
+  
+- **Intelligent Caching**:
+  - Options data is cached to reduce API calls and improve performance
+  - Cache automatically refreshes stale data in the background
+  - Bidirectional synchronization between cache and registry ensures consistency
+  
+- **Auto-Loading**:
+  - Tickers in the registry are automatically loaded during refresh cycles
+  - New tickers are added to the registry when first accessed
+  - This creates an ever-growing library of options data for frequently accessed tickers
 
 ## Installation Steps
 
