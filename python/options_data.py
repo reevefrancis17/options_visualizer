@@ -33,12 +33,26 @@ if os.path.exists(error_log):
         f.write(f"=== New session started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
 class OptionsDataManager:
-    """Central manager for options data handling."""
+    """
+    Central manager for options data handling.
+    
+    This class is responsible for fetching, processing, and caching options data.
+    It serves as the main interface between the data source (e.g., Yahoo Finance)
+    and the application, providing methods to retrieve and analyze options data.
+    """
     DATA_SOURCE_YAHOO = "yahoo"
     MODEL_BLACK_SCHOLES = "black_scholes"
     MODEL_MARKET = "market"
 
     def __init__(self, data_source=DATA_SOURCE_YAHOO, pricing_model=MODEL_MARKET, cache_duration=600):
+        """
+        Initialize the OptionsDataManager.
+        
+        Args:
+            data_source: Source of options data (default: Yahoo Finance)
+            pricing_model: Model used for pricing options (default: market prices)
+            cache_duration: How long to cache data in seconds (default: 10 minutes)
+        """
         logger.info(f"Initializing OptionsDataManager with source={data_source}, model={pricing_model}")
         self.data_source = data_source
         self.pricing_model = pricing_model
@@ -63,9 +77,10 @@ class OptionsDataManager:
                     time.sleep(self.cache_duration)
                     
                     logger.info("Starting cache refresh cycle")
-                    # Get all tickers in the cache
+                    
+                    # Get all tickers from the registry (single source of truth)
                     tickers = self._cache.get_all_tickers()
-                    logger.info(f"Refreshing {len(tickers)} tickers in cache")
+                    logger.info(f"Refreshing {len(tickers)} tickers from registry")
                     
                     # Refresh each ticker
                     for ticker in tickers:
@@ -75,7 +90,7 @@ class OptionsDataManager:
                                 logger.info(f"Skipping {ticker} - already being refreshed")
                                 continue
                             
-                            logger.info(f"Refreshing cached data for {ticker}")
+                            logger.info(f"Refreshing data for {ticker}")
                             self._refresh_ticker(ticker)
                             
                             # Sleep briefly between refreshes to avoid overwhelming the API
@@ -86,30 +101,43 @@ class OptionsDataManager:
                     logger.info("Cache refresh cycle complete")
                 except Exception as e:
                     logger.error(f"Error in cache polling: {str(e)}")
-                    # Sleep before retrying
-                    time.sleep(60)
+                    time.sleep(60)  # Sleep before retrying
         
-        # Start polling thread
-        polling_thread = threading.Thread(target=poll_and_refresh_cache, daemon=True)
-        polling_thread.start()
-        logger.info("Started cache polling thread")
+        # Start the polling thread
+        thread = threading.Thread(target=poll_and_refresh_cache, daemon=True)
+        thread.start()
+        logger.info("Cache polling thread started")
 
     def _refresh_ticker(self, ticker: str):
-        """Refresh data for a ticker in the background."""
-        # Start fetching in the background
-        self.start_fetching(ticker)
+        """Refresh the cached data for a ticker."""
+        try:
+            # Skip if already being refreshed
+            if ticker in self._loading_state:
+                logger.info(f"Skipping refresh for {ticker} - already in progress")
+                return
+            
+            # Update the ticker registry (single source of truth)
+            self._cache.update_registry(ticker)
+            
+            # Start fetching in the background
+            self.start_fetching(ticker)
+        except Exception as e:
+            logger.error(f"Error refreshing ticker {ticker}: {str(e)}")
 
     def get_current_processor(self, ticker: str) -> Tuple[Optional['OptionsDataProcessor'], Optional[float], str, float]:
-        """Get the current processor for a ticker with status information.
+        """
+        Get the current options data processor for a ticker.
         
         Args:
-            ticker: The stock ticker symbol
+            ticker: The ticker symbol to get data for
             
         Returns:
-            Tuple of (processor, price, status, progress)
+            Tuple of (processor, current_price, status, progress)
             where status is one of: 'complete', 'partial', 'loading', 'not_found'
-            and progress is a float between 0 and 1
         """
+        # Update the ticker registry (single source of truth)
+        self._cache.update_registry(ticker)
+        
         # Check if we're currently loading this ticker
         is_loading = ticker in self._loading_state
         
@@ -117,7 +145,7 @@ class OptionsDataManager:
         cached_data = self._cache.get(ticker)
         
         if cached_data:
-            options_data, price, timestamp, progress, processed_dates, total_dates = cached_data
+            options_data, price, timestamp, age, processed_dates, total_dates = cached_data
             
             # Calculate age of cache - ensure timestamp is a float
             try:
@@ -176,15 +204,19 @@ class OptionsDataManager:
         return None, None, 'loading', 0.0
 
     def start_fetching(self, ticker: str, skip_interpolation: bool = False) -> bool:
-        """Start fetching options data for a ticker in the background.
+        """
+        Start fetching options data for a ticker.
         
         Args:
-            ticker: The stock ticker symbol
-            skip_interpolation: DEPRECATED - Always uses 2D interpolation now
+            ticker: The ticker symbol to fetch data for
+            skip_interpolation: Whether to skip interpolation (for faster loading)
             
         Returns:
-            True if fetch started, False otherwise
+            True if fetching started, False if already in progress
         """
+        # Update the ticker registry (single source of truth)
+        self._cache.update_registry(ticker)
+        
         # Always use 2D interpolation for better data quality
         skip_interpolation = False
         
@@ -843,8 +875,16 @@ class OptionsDataProcessor:
 
     def interpolate_missing_values_2d(self):
         """
-        Interpolate missing values (NaN or zero) in 2D (across strikes and expiration dates).
-        Uses xarray's interpolate_na functionality after converting zeros to NaN.
+        Interpolate missing values in the options data using 2D interpolation.
+        
+        This method:
+        1. Identifies missing values in the dataset
+        2. Uses griddata with cubic interpolation to fill gaps in the surface
+        3. Handles edge cases where interpolation might fail
+        4. Creates a complete surface across both strike prices and expiration dates
+        
+        This is particularly important for calculating accurate greeks which require
+        a smooth, continuous surface without gaps.
         """
         if not self.ds:
             logger.error("Cannot interpolate: No dataset available")
@@ -945,7 +985,17 @@ class OptionsDataProcessor:
         logger.info("2D interpolation completed")
 
     def _apply_smoothing(self):
-        """Apply smoothing to reduce noise in the interpolated data."""
+        """
+        Apply smoothing to implied volatility surface.
+        
+        This method implements a sophisticated smoothing algorithm for the IV surface:
+        1. First applies 1D smoothing along strike dimension for each expiry
+        2. Then applies 2D smoothing across both strike and expiry dimensions
+        3. Uses a combination of median filtering and Gaussian smoothing
+        4. Preserves the volatility smile shape while removing noise and outliers
+        
+        The smoothed IV surface helps in more accurate pricing and greeks calculation.
+        """
         try:
             from scipy.ndimage import gaussian_filter
             
@@ -1426,15 +1476,22 @@ class OptionsDataProcessor:
 
     def reverse_engineer_iv(self):
         """
-        Reverse engineer implied volatility from interpolated market prices.
-        This is useful when IV data is missing but price data is available.
-        Uses interpolated price data for more accurate and consistent IV calculations.
+        Reverse engineer implied volatility from option prices.
+        
+        This method:
+        1. Takes market prices of options
+        2. Uses numerical methods to find the implied volatility that would produce those prices
+        3. Implements a robust algorithm that handles edge cases (deep ITM/OTM options)
+        4. Uses bisection method with adaptive step size for efficient convergence
+        
+        The resulting IV values are critical for understanding market sentiment and
+        for accurate calculation of other option metrics.
         """
         if self.ds is None:
             logger.error("Cannot reverse engineer IV: dataset is None")
             return
             
-        logger.info("Reverse engineering implied volatility from interpolated market prices")
+        logger.info("Reverse engineering implied volatility from option prices")
         
         # Import the implied_volatility function
         from python.models.black_scholes import implied_volatility

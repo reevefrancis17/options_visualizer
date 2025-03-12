@@ -7,6 +7,29 @@ A web application for visualizing stock options data fetched from Yahoo Finance.
 - Track values at specific strike prices with interactive crosshairs
 - Compare intrinsic and extrinsic option values
 
+## Project Structure
+
+```
+options_visualizer/
+├── options_visualizer_web/    # Frontend
+│   ├── static/                # CSS, JavaScript, and other static assets
+│   ├── templates/             # HTML templates
+│   └── app.py                 # Frontend Flask application
+├── options_visualizer_backend/ # Backend
+│   ├── models/                # Pricing models and data logic
+│   │   ├── black_scholes.py   # Black-Scholes option pricing model
+│   │   └── yahoo_finance.py   # Yahoo Finance data fetching
+│   ├── cache/                 # Cached data storage
+│   ├── data/                  # Data storage and processing
+│   ├── utils/                 # Utility functions
+│   └── app.py                 # Backend Flask API server
+├── python/                    # Shared utilities
+│   ├── options_data.py        # Options data processing
+│   ├── cache_manager.py       # Cache management utilities
+│   └── options_preprocessor.py # Data preprocessing utilities
+└── README.md                  # This file
+```
+
 ## Installation Steps
 
 1. **Install Python**
@@ -29,9 +52,42 @@ A web application for visualizing stock options data fetched from Yahoo Finance.
      ```
      cd path/to/options-visualizer
      ```
-   - Install requirements:
+
+## Developer Setup
+
+1. **Create a Virtual Environment**
+   ```bash
+   python -m venv .venv
+   ```
+
+2. **Activate the Virtual Environment**
+   - On Windows:
+     ```bash
+     .venv\Scripts\activate
      ```
-     pip install -r requirements.txt
+   - On macOS/Linux:
+     ```bash
+     source .venv/bin/activate
+     ```
+
+3. **Install Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Run the Application**
+   ```bash
+   python options_visualizer_backend/main.py
+   ```
+
+5. **Code Style and Linting**
+   - Format code with Black:
+     ```bash
+     black .
+     ```
+   - Check code style with Flake8:
+     ```bash
+     flake8 .
      ```
 
 ## Running the Application in Test Environment
@@ -59,25 +115,6 @@ Open your browser and navigate to:
 ```
 http://localhost:5001
 ```
-
-## Project Structure
-
-The project is organized into two main components:
-
-- `options_visualizer_web/` - Contains the frontend web application
-  - `app.py` - Flask application with routes and frontend API endpoints
-  - `static/` - JavaScript, CSS, and other static assets
-  - `templates/` - HTML templates
-- `options_visualizer_backend/` - Contains the backend API server
-  - `app.py` - Flask application with API endpoints for options data
-  - `models/` - Contains options pricing models
-  - `data/` - Data storage directory
-  - `cache/` - Cache storage directory
-- `python/` - Shared Python modules
-  - `options_data.py` - Core options data processing logic
-  - `yahoo_finance.py` - Yahoo Finance API integration
-  - `cache_manager.py` - Data caching system
-- `main.py` - Unified entry point that runs both servers
 
 ## Using the Web Application
 

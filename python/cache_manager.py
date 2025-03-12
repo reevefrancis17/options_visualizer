@@ -29,10 +29,20 @@ class OptionsCache:
         self.db_path = self._get_cache_path()
         self.lock = threading.RLock()  # Reentrant lock for thread safety
         self.ticker_locks = {}  # Per-ticker locks for thread safety
+        
+        # Path to the ticker registry file - single source of truth for tickers
+        self.registry_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'ticker_registry.json')
+        self.registry_lock = threading.RLock()  # Lock for thread-safe registry access
+        
+        # Ensure the registry file exists
+        self._ensure_registry_exists()
+        
+        # Initialize the database
         self._initialize_db()
-        self._migrate_db_if_needed()  # Add migration step
-        self.cached_tickers = set()
-        self._load_cached_tickers()
+        self._migrate_db_if_needed()
+        
+        # Synchronize the cache with the registry (bidirectional)
+        self._sync_cache_with_registry()
         
         # Start background polling for cache updates
         self._start_polling()
@@ -49,62 +59,173 @@ class OptionsCache:
             base_dir = os.path.expanduser('~')
             cache_dir = os.path.join(base_dir, '.cache', app_name)
         
-        # Create directory if it doesn't exist
+        # Create cache directory if it doesn't exist
         os.makedirs(cache_dir, exist_ok=True)
         
-        return Path(cache_dir) / "options_cache.db"
-    
-    def _initialize_db(self):
-        """Initialize the SQLite database with the required schema."""
+        return Path(os.path.join(cache_dir, 'options_cache.db'))
+
+    def _ensure_registry_exists(self):
+        """Ensure the ticker registry file exists."""
+        # Create the data directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.registry_path), exist_ok=True)
+        
+        # Create an empty registry file if it doesn't exist
+        if not os.path.exists(self.registry_path):
+            with open(self.registry_path, 'w') as f:
+                json.dump({}, f, indent=2)
+            logger.info(f"Created new ticker registry at {self.registry_path}")
+
+    def _load_registry(self) -> Dict:
+        """Load the ticker registry from file."""
+        with self.registry_lock:
+            try:
+                with open(self.registry_path, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError) as e:
+                logger.error(f"Error loading ticker registry: {str(e)}")
+                return {}
+
+    def _save_registry(self, registry: Dict):
+        """Save the ticker registry to file."""
+        with self.registry_lock:
+            try:
+                with open(self.registry_path, 'w') as f:
+                    json.dump(registry, f, indent=2)
+            except Exception as e:
+                logger.error(f"Error saving ticker registry: {str(e)}")
+
+    def update_registry(self, ticker: str):
+        """Update the ticker registry with a new or existing ticker."""
+        with self.registry_lock:
+            registry = self._load_registry()
+            now = datetime.now().isoformat()
+            
+            if ticker in registry:
+                # Update existing ticker
+                registry[ticker]["last_accessed"] = now
+                registry[ticker]["access_count"] += 1
+            else:
+                # Add new ticker
+                registry[ticker] = {
+                    "first_added": now,
+                    "last_accessed": now,
+                    "access_count": 1
+                }
+                logger.info(f"Added new ticker {ticker} to registry")
+            
+            self._save_registry(registry)
+
+    def get_registry_tickers(self) -> List[str]:
+        """Get all tickers from the registry."""
+        registry = self._load_registry()
+        return list(registry.keys())
+
+    def _sync_cache_with_registry(self):
+        """Synchronize the cache with the registry bidirectionally.
+        
+        This ensures that:
+        1. All tickers in the cache are also in the registry
+        2. All tickers in the registry are loaded into the cache
+        3. The registry is the single source of truth for tickers
+        """
+        try:
+            # Get all tickers from the cache
+            cached_tickers = self._get_cached_tickers_from_db()
+            
+            # Get all tickers from the registry
+            registry_tickers = set(self.get_registry_tickers())
+            
+            # Add any cached tickers that are not in the registry
+            with self.registry_lock:
+                registry = self._load_registry()
+                now = datetime.now().isoformat()
+                
+                for ticker in cached_tickers:
+                    if ticker not in registry:
+                        logger.info(f"Adding cached ticker {ticker} to registry")
+                        registry[ticker] = {
+                            "first_added": now,
+                            "last_accessed": now,
+                            "access_count": 1
+                        }
+                
+                self._save_registry(registry)
+            
+            # Trigger loading of registry tickers that aren't in the cache
+            for ticker in registry_tickers:
+                if ticker not in cached_tickers:
+                    logger.info(f"Ticker {ticker} from registry not in cache - will be loaded during next refresh cycle")
+            
+            logger.info(f"Synchronized cache with registry: {len(registry_tickers)} registry tickers, {len(cached_tickers)} cached tickers")
+        except Exception as e:
+            logger.error(f"Error synchronizing cache with registry: {str(e)}")
+
+    def _get_cached_tickers_from_db(self) -> set:
+        """Get all tickers from the cache database."""
         try:
             with self.lock:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticker FROM options_cache")
+                tickers = cursor.fetchall()
+                conn.close()
+                
+                return {ticker[0] for ticker in tickers}
+        except Exception as e:
+            logger.error(f"Error getting cached tickers from database: {str(e)}")
+            return set()
+
+    def _initialize_db(self):
+        """Initialize the SQLite database with the required tables."""
+        try:
+            with self.lock:
+                # Create a backup of the database if it exists
+                if os.path.exists(self.db_path):
+                    backup_path = f"{self.db_path}.bak"
+                    try:
+                        shutil.copy2(self.db_path, backup_path)
+                        logger.info(f"Created backup of cache database at {backup_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create backup of cache database: {str(e)}")
+                
                 # Connect to the database
-                conn = sqlite3.connect(str(self.db_path))
+                conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
-                # Enable WAL mode for better crash recovery
-                cursor.execute("PRAGMA journal_mode=WAL;")
-                cursor.execute("PRAGMA synchronous=NORMAL;")  # Slightly faster with good safety
-                cursor.execute("PRAGMA temp_store=MEMORY;")   # Store temp tables in memory
-                
                 # Create the options_cache table if it doesn't exist
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS options_cache (
-                        ticker TEXT PRIMARY KEY,
-                        data BLOB,
-                        current_price REAL,
-                        last_updated REAL,
-                        processed_dates INTEGER,
-                        total_dates INTEGER,
-                        is_compressed INTEGER DEFAULT 1
-                    );
-                """)
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS options_cache (
+                    ticker TEXT PRIMARY KEY,
+                    data BLOB,
+                    current_price REAL,
+                    timestamp REAL,
+                    processed_dates INTEGER,
+                    total_dates INTEGER
+                )
+                ''')
                 
-                # Create index on ticker for faster lookups
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_ticker ON options_cache (ticker);")
+                # Create the metadata table if it doesn't exist
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+                ''')
                 
-                # Create a metadata table for cache info
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS cache_metadata (
-                        key TEXT PRIMARY KEY,
-                        value TEXT
-                    );
-                """)
+                # Set the schema version
+                cursor.execute('''
+                INSERT OR REPLACE INTO metadata (key, value)
+                VALUES ('schema_version', '2')
+                ''')
                 
-                # Insert or update version info
-                cursor.execute("""
-                    INSERT OR REPLACE INTO cache_metadata (key, value)
-                    VALUES ('version', '2.0');
-                """)
-                
-                # Commit changes and close connection
+                # Commit the changes and close the connection
                 conn.commit()
                 conn.close()
                 
-                logger.info(f"Initialized cache database at {self.db_path}")
+                logger.info("Cache database initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing cache database: {str(e)}")
-            # If initialization fails, try to recover by recreating the database
+            # Try to recover the database if initialization fails
             self._recover_database()
     
     def _migrate_db_if_needed(self):
@@ -127,34 +248,29 @@ class OptionsCache:
                     
                     # Update version in metadata
                     cursor.execute("""
-                        INSERT OR REPLACE INTO cache_metadata (key, value)
-                        VALUES ('version', '2.0');
+                        INSERT OR REPLACE INTO metadata (key, value)
+                        VALUES ('version', '2.0')
                     """)
                     
                     conn.commit()
                     logger.info("Database migration completed successfully")
+                
+                # Check if timestamp column exists
+                if 'timestamp' not in columns:
+                    logger.info("Migrating database: Adding timestamp column")
+                    cursor.execute("ALTER TABLE options_cache ADD COLUMN timestamp REAL DEFAULT 0")
+                    
+                    # Update existing records with current timestamp
+                    cursor.execute("UPDATE options_cache SET timestamp = ?", (time.time(),))
+                    
+                    conn.commit()
+                    logger.info("Timestamp column added successfully")
                 
                 conn.close()
         except Exception as e:
             logger.error(f"Error during database migration: {str(e)}")
             # If migration fails, try to recover
             self._recover_database()
-    
-    def _load_cached_tickers(self):
-        """Load the list of cached tickers from the database."""
-        try:
-            with self.lock:
-                conn = sqlite3.connect(str(self.db_path))
-                cursor = conn.cursor()
-                cursor.execute("SELECT ticker FROM options_cache")
-                tickers = cursor.fetchall()
-                conn.close()
-                
-                self.cached_tickers = {ticker[0] for ticker in tickers}
-                logger.info(f"Loaded {len(self.cached_tickers)} tickers from cache")
-        except Exception as e:
-            logger.error(f"Error loading cached tickers: {str(e)}")
-            self.cached_tickers = set()
     
     def _recover_database(self):
         """Attempt to recover the database if it's corrupted."""
@@ -203,88 +319,63 @@ class OptionsCache:
         except Exception as e:
             logger.error(f"Error during database recovery: {str(e)}")
     
-    def _vacuum_db(self):
-        """Vacuum the database to reclaim space and optimize performance."""
-        try:
-            conn = sqlite3.connect(str(self.db_path))
-            conn.execute("VACUUM;")
-            conn.close()
-            logger.info("Database vacuumed successfully")
-        except Exception as e:
-            logger.error(f"Error vacuuming database: {str(e)}")
-    
     def get(self, ticker: str) -> Tuple[Optional[Dict], Optional[float], float, float, int, int]:
-        """Get cached data for a ticker.
+        """Get options data from the cache.
         
         Args:
-            ticker: The stock ticker symbol
-            
-        Returns:
-            Tuple of (options_data, current_price, timestamp, progress, processed_dates, total_dates)
-            where timestamp is a float representing the Unix timestamp when the data was cached
-        """
-        try:
-            # Use the ticker-specific lock for thread safety
-            with self.get_lock(ticker):
-                # Connect to the database
-                conn = sqlite3.connect(str(self.db_path))
-                cursor = conn.cursor()
-                
-                # Query the cache for the ticker
-                cursor.execute(
-                    """SELECT data, current_price, last_updated, processed_dates, total_dates, 
-                       CASE WHEN is_compressed IS NULL THEN 0 ELSE is_compressed END 
-                       FROM options_cache WHERE ticker = ?""",
-                    (ticker,)
-                )
-                result = cursor.fetchone()
-                conn.close()
-                
-                # If no result, return not found
-                if not result:
-                    return None, None, time.time(), 0, 0, 0
-                
-                # Unpack the result
-                data_blob, current_price, timestamp, processed_dates, total_dates, is_compressed = result
-                
-                # Ensure timestamp is a float
-                try:
-                    timestamp = float(timestamp)
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid timestamp for {ticker}, using current time")
-                    timestamp = time.time()
-                
-                # Add ticker to cached tickers set if not already there
-                if ticker not in self.cached_tickers:
-                    self.cached_tickers.add(ticker)
-                
-                # Check if cache is stale (older than cache_duration)
-                is_stale = (time.time() - timestamp > self.cache_duration)
-                
-                # Deserialize the data - use a more efficient approach
-                try:
-                    if is_compressed:
-                        # Use a memory-efficient approach for large data
-                        options_data = pickle.loads(zlib.decompress(data_blob))
-                    else:
-                        # Just unpickle (for backward compatibility)
-                        options_data = pickle.loads(data_blob)
-                except Exception as deserialize_error:
-                    logger.error(f"Error deserializing data for {ticker}: {str(deserialize_error)}")
-                    return None, None, time.time(), 0, 0, 0
-                
-                # Calculate progress
-                progress = processed_dates / max(total_dates, 1) if total_dates > 0 else 0
-                
-                # Trigger a background refresh if stale
-                if is_stale:
-                    self._trigger_refresh(ticker)
-                
-                return options_data, current_price, timestamp, progress, processed_dates, total_dates
+            ticker: The ticker symbol to get data for
         
-        except Exception as e:
-            logger.error(f"Error retrieving data from cache for {ticker}: {str(e)}")
-            return None, None, time.time(), 0, 0, 0
+        Returns:
+            Tuple of (options_data, current_price, timestamp, age, processed_dates, total_dates)
+            or (None, None, 0, 0, 0, 0) if not found
+        """
+        # Update the ticker registry - single source of truth
+        self.update_registry(ticker)
+        
+        ticker_lock = self.get_lock(ticker)
+        with ticker_lock:
+            try:
+                with self.lock:
+                    # Connect to the database
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    
+                    # Get the options data for the ticker
+                    cursor.execute('''
+                    SELECT data, current_price, timestamp, processed_dates, total_dates
+                    FROM options_cache
+                    WHERE ticker = ?
+                    ''', (ticker,))
+                    
+                    result = cursor.fetchone()
+                    conn.close()
+                    
+                    if result:
+                        # Decompress and unpickle the data
+                        compressed_data, current_price, timestamp, processed_dates, total_dates = result
+                        try:
+                            data = pickle.loads(zlib.decompress(compressed_data))
+                            
+                            # Calculate the age of the data
+                            now = time.time()
+                            age = now - timestamp if timestamp is not None else float('inf')
+                            
+                            # Check if the data is stale
+                            if age > self.cache_duration:
+                                # Trigger a refresh in the background
+                                self._trigger_refresh(ticker)
+                            
+                            return data, current_price, timestamp, age, processed_dates, total_dates
+                        except Exception as e:
+                            logger.error(f"Error decompressing/unpickling cached data for {ticker}: {str(e)}")
+                            # Delete the corrupted data
+                            self.delete(ticker)
+                            return None, None, 0, 0, 0, 0
+                    else:
+                        return None, None, 0, 0, 0, 0
+            except Exception as e:
+                logger.error(f"Error getting cached data for {ticker}: {str(e)}")
+                return None, None, 0, 0, 0, 0
     
     def _trigger_refresh(self, ticker: str):
         """Trigger a background refresh of a stale ticker."""
@@ -317,104 +408,42 @@ class OptionsCache:
             processed_dates: Number of expiration dates processed
             total_dates: Total number of expiration dates
         """
+        # Update the ticker registry - single source of truth
+        self.update_registry(ticker)
+        
         try:
             # Use the ticker-specific lock for thread safety
             with self.get_lock(ticker):
                 # Connect to the database
-                conn = sqlite3.connect(str(self.db_path))
+                conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
                 # Serialize and compress the data
                 try:
-                    # Use highest compression level (9) for better storage efficiency
-                    # Use protocol 5 for better performance with large objects
+                    # Use highest compression level for better storage efficiency
                     pickled_data = pickle.dumps(options_data, protocol=pickle.HIGHEST_PROTOCOL)
-                    data_blob = zlib.compress(pickled_data, level=9)
-                    is_compressed = 1
+                    data_blob = zlib.compress(pickled_data, level=self.compression_level)
                 except Exception as serialize_error:
-                    logger.error(f"Error compressing data for {ticker}, falling back to uncompressed: {str(serialize_error)}")
+                    logger.error(f"Error compressing data for {ticker}: {str(serialize_error)}")
                     # Fall back to uncompressed pickle if compression fails
                     data_blob = pickle.dumps(options_data, protocol=pickle.HIGHEST_PROTOCOL)
-                    is_compressed = 0
-                
-                # Begin transaction
-                cursor.execute("BEGIN IMMEDIATE TRANSACTION;")
                 
                 # Insert or replace the data
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO options_cache 
-                    (ticker, data, current_price, last_updated, processed_dates, total_dates, is_compressed)
-                    VALUES (?, ?, ?, ?, ?, ?, ?);
-                    """,
-                    (ticker, data_blob, current_price, time.time(), processed_dates, total_dates, is_compressed)
-                )
+                cursor.execute('''
+                INSERT OR REPLACE INTO options_cache 
+                (ticker, data, current_price, timestamp, processed_dates, total_dates)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''', (ticker, data_blob, current_price, time.time(), processed_dates, total_dates))
                 
-                # Commit the transaction
-                cursor.execute("COMMIT;")
+                # Commit the changes and close the connection
+                conn.commit()
                 conn.close()
-                
-                # Add to cached tickers set
-                self.cached_tickers.add(ticker)
                 
                 # Log the size of the data for monitoring
                 data_size_kb = len(data_blob) / 1024
                 logger.info(f"Cached data for {ticker} ({processed_dates}/{total_dates} dates), size: {data_size_kb:.2f} KB")
-        
         except Exception as e:
             logger.error(f"Error caching data for {ticker}: {str(e)}")
-    
-    def batch_set(self, items: List[Tuple[str, Dict, float, int, int]]):
-        """Store multiple items in the cache in a single transaction.
-        
-        Args:
-            items: List of tuples (ticker, options_data, current_price, processed_dates, total_dates)
-        """
-        if not items:
-            return
-            
-        try:
-            with self.lock:
-                # Connect to the database
-                conn = sqlite3.connect(str(self.db_path))
-                cursor = conn.cursor()
-                
-                # Begin transaction
-                cursor.execute("BEGIN IMMEDIATE TRANSACTION;")
-                
-                # Process each item
-                for ticker, options_data, current_price, processed_dates, total_dates in items:
-                    try:
-                        # Serialize and compress the data
-                        pickled_data = pickle.dumps(options_data, protocol=pickle.HIGHEST_PROTOCOL)
-                        data_blob = zlib.compress(pickled_data, level=9)
-                        is_compressed = 1
-                    except Exception:
-                        # Fall back to uncompressed pickle if compression fails
-                        data_blob = pickle.dumps(options_data, protocol=pickle.HIGHEST_PROTOCOL)
-                        is_compressed = 0
-                    
-                    # Insert or replace the data
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO options_cache 
-                        (ticker, data, current_price, last_updated, processed_dates, total_dates, is_compressed)
-                        VALUES (?, ?, ?, ?, ?, ?, ?);
-                        """,
-                        (ticker, data_blob, current_price, time.time(), processed_dates, total_dates, is_compressed)
-                    )
-                    
-                    # Add to cached tickers set
-                    self.cached_tickers.add(ticker)
-                
-                # Commit the transaction
-                cursor.execute("COMMIT;")
-                conn.close()
-                
-                logger.info(f"Batch cached {len(items)} items")
-            
-        except Exception as e:
-            logger.error(f"Error in batch cache operation: {str(e)}")
     
     def clear(self, ticker: Optional[str] = None):
         """Clear the cache for a specific ticker or all tickers."""
@@ -423,7 +452,7 @@ class OptionsCache:
                 # Use the ticker-specific lock for thread safety
                 with self.get_lock(ticker):
                     # Connect to the database
-                    conn = sqlite3.connect(str(self.db_path))
+                    conn = sqlite3.connect(self.db_path)
                     cursor = conn.cursor()
                     
                     # Delete the ticker from the cache
@@ -433,16 +462,12 @@ class OptionsCache:
                     conn.commit()
                     conn.close()
                     
-                    # Remove from cached tickers set
-                    if ticker in self.cached_tickers:
-                        self.cached_tickers.remove(ticker)
-                    
                     logger.info(f"Cleared cache for {ticker}")
             else:
                 # Clear all tickers - use the global lock
                 with self.lock:
                     # Connect to the database
-                    conn = sqlite3.connect(str(self.db_path))
+                    conn = sqlite3.connect(self.db_path)
                     cursor = conn.cursor()
                     
                     # Delete all data from the cache
@@ -451,9 +476,6 @@ class OptionsCache:
                     # Commit changes and close connection
                     conn.commit()
                     conn.close()
-                    
-                    # Clear cached tickers set
-                    self.cached_tickers.clear()
                     
                     logger.info("Cleared entire cache")
         except Exception as e:
@@ -468,8 +490,10 @@ class OptionsCache:
     def maintenance(self):
         """Perform maintenance tasks on the cache database.
         
-        Note: This will NOT delete any entries to ensure the cache never shrinks.
-        It will only update the list of cached tickers.
+        This includes:
+        1. Checking database integrity
+        2. Synchronizing with the registry
+        3. Updating the list of cached tickers
         """
         try:
             with self.lock:
@@ -485,121 +509,70 @@ class OptionsCache:
                     self._recover_database()
                     return
                 
-                # Get all tickers in the cache
-                cursor.execute("SELECT ticker FROM options_cache;")
-                tickers = cursor.fetchall()
-                
-                # Update the cached tickers set
-                self.cached_tickers = {ticker[0] for ticker in tickers}
-                
                 # Close connection
                 conn.close()
                 
-                logger.info(f"Cache maintenance completed. {len(self.cached_tickers)} tickers in cache.")
+                # Synchronize with the registry
+                self._sync_cache_with_registry()
+                
+                logger.info("Cache maintenance completed successfully")
         except Exception as e:
             logger.error(f"Error during cache maintenance: {str(e)}")
             # Try to recover the database
             self._recover_database()
     
-    def get_stats(self):
-        """Get statistics about the cache."""
-        try:
-            with self.lock:
-                # Connect to the database
-                conn = sqlite3.connect(str(self.db_path))
-                cursor = conn.cursor()
-                
-                # Get count of entries
-                cursor.execute("SELECT COUNT(*) FROM options_cache;")
-                count = cursor.fetchone()[0]
-                
-                # Get total size of data
-                cursor.execute("SELECT SUM(LENGTH(data)) FROM options_cache;")
-                total_size = cursor.fetchone()[0] or 0
-                
-                # Get compression stats - safely check if column exists first
-                try:
-                    cursor.execute("PRAGMA table_info(options_cache)")
-                    columns = [column[1] for column in cursor.fetchall()]
-                    
-                    if 'is_compressed' in columns:
-                        cursor.execute("SELECT COUNT(*) FROM options_cache WHERE is_compressed = 1;")
-                        compressed_count = cursor.fetchone()[0]
-                    else:
-                        compressed_count = 0
-                except Exception as column_error:
-                    logger.warning(f"Error checking compression stats: {str(column_error)}")
-                    compressed_count = 0
-                
-                # Get oldest and newest entries
-                cursor.execute("SELECT MIN(last_updated), MAX(last_updated) FROM options_cache;")
-                min_time, max_time = cursor.fetchone()
-                
-                # Get database file size
-                db_size = os.path.getsize(str(self.db_path)) if os.path.exists(str(self.db_path)) else 0
-                
-                # Get WAL file size if it exists
-                wal_path = str(self.db_path) + "-wal"
-                wal_size = os.path.getsize(wal_path) if os.path.exists(wal_path) else 0
-                
-                # Close connection
-                conn.close()
-                
-                # Format times as readable strings
-                oldest = datetime.fromtimestamp(min_time).strftime('%Y-%m-%d %H:%M:%S') if min_time else 'N/A'
-                newest = datetime.fromtimestamp(max_time).strftime('%Y-%m-%d %H:%M:%S') if max_time else 'N/A'
-                
-                # Return stats
-                return {
-                    'entries': count,
-                    'data_size_mb': total_size / (1024 * 1024) if total_size else 0,
-                    'db_size_mb': db_size / (1024 * 1024),
-                    'wal_size_mb': wal_size / (1024 * 1024),
-                    'compressed_entries': compressed_count,
-                    'compression_ratio': f"{compressed_count}/{count}" if count else "0/0",
-                    'oldest_entry': oldest,
-                    'newest_entry': newest,
-                    'cached_tickers': list(self.cached_tickers)
-                }
-        except Exception as e:
-            logger.error(f"Error getting cache stats: {str(e)}")
-            return {
-                'entries': 0,
-                'data_size_mb': 0,
-                'db_size_mb': 0,
-                'wal_size_mb': 0,
-                'compressed_entries': 0,
-                'compression_ratio': "0/0",
-                'oldest_entry': 'N/A',
-                'newest_entry': 'N/A',
-                'error': str(e),
-                'cached_tickers': []
-            }
-    
     def get_all_tickers(self) -> List[str]:
-        """Get a list of all tickers in the cache."""
-        return list(self.cached_tickers)
+        """Get a list of all tickers in the cache and registry.
+        
+        This returns the union of tickers in both the cache and registry,
+        ensuring we have a complete list of all tickers.
+        """
+        # Get tickers from the registry (single source of truth)
+        registry_tickers = set(self.get_registry_tickers())
+        
+        # Get tickers from the cache
+        cached_tickers = self._get_cached_tickers_from_db()
+        
+        # Return the union of both sets
+        all_tickers = registry_tickers.union(cached_tickers)
+        return list(all_tickers)
     
     def _start_polling(self):
-        """Start a background thread to poll for cache updates every 10 minutes."""
+        """Start a background thread to poll and refresh the cache periodically."""
         def poll_cache():
             while True:
                 try:
-                    logger.info("Starting cache polling cycle")
                     # Sleep first to allow the application to initialize
-                    time.sleep(self.cache_duration)
+                    time.sleep(self.cache_duration / 2)
                     
-                    # This will be used by the OptionsDataManager to refresh all cached tickers
-                    logger.info("Cache polling cycle complete")
+                    # Synchronize the cache with the registry (bidirectional)
+                    self._sync_cache_with_registry()
+                    
+                    # Get all tickers from the registry (single source of truth)
+                    registry_tickers = self.get_registry_tickers()
+                    
+                    # Get all tickers currently in the cache
+                    cached_tickers = self._get_cached_tickers_from_db()
+                    
+                    # Load all tickers from the registry into the cache
+                    for ticker in registry_tickers:
+                        # Check if the ticker is already in the cache
+                        if ticker not in cached_tickers:
+                            logger.info(f"Auto-loading ticker {ticker} from registry")
+                            # Trigger a refresh for this ticker
+                            self._trigger_refresh(ticker)
+                            # Sleep briefly to avoid overwhelming the API
+                            time.sleep(1)
+                    
+                    # Perform cache maintenance
+                    self.maintenance()
                 except Exception as e:
-                    logger.error(f"Error in cache polling: {str(e)}")
-                    # Sleep before retrying
-                    time.sleep(60)
+                    logger.error(f"Error in cache polling thread: {str(e)}")
         
-        # Start polling thread
-        polling_thread = threading.Thread(target=poll_cache, daemon=True)
-        polling_thread.start()
-        logger.info("Started cache polling thread")
+        # Start the polling thread
+        thread = threading.Thread(target=poll_cache, daemon=True)
+        thread.start()
+        logger.info("Cache polling thread started")
     
     def get_lock(self, ticker):
         """Get a lock for a specific ticker.

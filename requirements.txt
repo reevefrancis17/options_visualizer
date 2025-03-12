@@ -2,15 +2,15 @@
 # Install with: pip install -r requirements.txt
 
 # Web Framework
-flask>=2.3.3
-flask-cors>=4.0.0
-requests>=2.31.0  # For HTTP requests between frontend and backend
+flask==2.2.3
+flask-cors==3.0.10
+requests==2.28.2  # For HTTP requests between frontend and backend
 
 # Data manipulation and analysis
-pandas>=2.1.1
-numpy>=1.26.0
-xarray>=2023.9.0
-scipy>=1.11.3
+pandas==1.5.3
+numpy==1.24.2
+xarray==2023.2.0
+scipy==1.10.1
 
 # Financial data and calculations
 yfinance>=0.2.36
@@ -26,6 +26,34 @@ apscheduler>=3.10.4
 tqdm>=4.65.0
 
 # Development tools
-pytest>=7.4.0  # For testing
-black>=23.9.1  # For code formatting
-flake8>=6.1.0  # For linting 
+pytest==7.3.1
+pytest-cov==4.1.0
+pytest-mock==3.10.0
+pytest-xdist==3.2.1
+pytest-timeout==2.1.0
+pytest-rerunfailures==11.1.2
+pytest-randomly==3.12.0
+pytest-sugar==0.9.7
+pytest-html==3.2.0
+pytest-metadata==2.0.4
+pytest-benchmark==4.0.0
+pytest-clarity==1.0.1
+
+# Linting and formatting tools
+black==23.3.0
+flake8==6.0.0
+
+# Testing tools
+selenium==4.10.0  # For end-to-end testing
+webdriver-manager==3.8.6  # For managing WebDriver binaries
+
+# Additional libraries
+matplotlib==3.7.1
+scikit-learn==1.2.2
+plotly==5.14.0
+dash==2.9.1
+dash-bootstrap-components==1.4.1
+dash-core-components==2.0.0
+dash-html-components==2.0.0
+dash-table==5.0.0
+gunicorn==20.1.0 
