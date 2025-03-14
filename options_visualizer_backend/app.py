@@ -7,7 +7,7 @@ import logging
 import json
 import math
 from datetime import datetime
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, render_template
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -58,10 +58,20 @@ class CustomJSONEncoder(json.JSONEncoder):
             return None
         return super().default(obj)
 
-# Initialize Flask app
-app = Flask(__name__)
+# Initialize Flask app with static and template folders
+static_folder = os.path.join(os.path.dirname(__file__), 'static')
+template_folder = os.path.join(os.path.dirname(__file__), 'templates')
+app = Flask(__name__, 
+           static_folder=static_folder, 
+           static_url_path='/static',
+           template_folder=template_folder)
 app.json_encoder = CustomJSONEncoder  # Use our custom encoder
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # Enable CORS for all API routes
+
+# Enable CORS for all API routes
+CORS(app)
+
+logger.info(f"Static folder: {static_folder}")
+logger.info(f"Template folder: {template_folder}")
 
 # Configuration
 CACHE_DIR = 'cache'
@@ -160,6 +170,12 @@ def refresh_all_tickers():
         logger.info("Completed scheduled cache refresh with fully interpolated data")
     except Exception as e:
         logger.error(f"Error in refresh_all_tickers: {str(e)}")
+
+# Frontend route to serve the main page
+@app.route('/')
+def index():
+    """Render the main page"""
+    return render_template('index.html')
 
 # API endpoint to get options data for a ticker
 @app.route('/api/options/<ticker>', methods=['GET'])
