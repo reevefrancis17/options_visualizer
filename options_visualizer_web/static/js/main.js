@@ -168,7 +168,7 @@ function fetchOptionsData(ticker, isPolling = false) {
         state.currentPrice = data.current_price;
         
         // Format expiry dates consistently
-        state.expiryDates = (data.expiry_dates || []).map(date => {
+        state.expiryDates = (data.options_data?.expiration_dates || data.expiry_dates || []).map(date => {
             // Check if the date is already a string in YYYY-MM-DD format
             if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
                 return date;
@@ -178,22 +178,84 @@ function fetchOptionsData(ticker, isPolling = false) {
         });
         
         // Process options data to ensure consistent date format
-        state.optionsData = (data.options_data || []).map(item => {
-            // Create a new object to avoid modifying the original
-            const newItem = {...item};
-            
-            // Ensure expiration is in YYYY-MM-DD format
-            if (newItem.expiration) {
-                if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
-                    // Already in the correct format
-                } else {
-                    // Convert to YYYY-MM-DD
-                    newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
+        // Check if data.options_data is an object with calls and puts arrays
+        if (data.options_data && typeof data.options_data === 'object' && !Array.isArray(data.options_data)) {
+            // Handle the structure where options_data is an object with calls and puts arrays
+            const calls = (data.options_data.calls || []).map(item => {
+                // Create a new object to avoid modifying the original
+                const newItem = {...item};
+                
+                // Ensure expiration is in YYYY-MM-DD format
+                if (newItem.expiration) {
+                    if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
+                        // Already in the correct format
+                    } else {
+                        // Convert to YYYY-MM-DD
+                        newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
+                    }
                 }
+                
+                // Add option_type if not present
+                if (!newItem.option_type) {
+                    newItem.option_type = 'call';
+                }
+                
+                return newItem;
+            });
+            
+            const puts = (data.options_data.puts || []).map(item => {
+                // Create a new object to avoid modifying the original
+                const newItem = {...item};
+                
+                // Ensure expiration is in YYYY-MM-DD format
+                if (newItem.expiration) {
+                    if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
+                        // Already in the correct format
+                    } else {
+                        // Convert to YYYY-MM-DD
+                        newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
+                    }
+                }
+                
+                // Add option_type if not present
+                if (!newItem.option_type) {
+                    newItem.option_type = 'put';
+                }
+                
+                return newItem;
+            });
+            
+            // Combine calls and puts into a single array
+            state.optionsData = [...calls, ...puts];
+            
+            // Update current price from the options_data object
+            if (data.options_data.current_price) {
+                state.currentPrice = data.options_data.current_price;
             }
             
-            return newItem;
-        });
+            // Update symbol from the options_data object
+            if (data.options_data.ticker) {
+                state.symbol = data.options_data.ticker;
+            }
+        } else {
+            // Handle the original structure where options_data is an array
+            state.optionsData = (data.options_data || []).map(item => {
+                // Create a new object to avoid modifying the original
+                const newItem = {...item};
+                
+                // Ensure expiration is in YYYY-MM-DD format
+                if (newItem.expiration) {
+                    if (typeof newItem.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newItem.expiration)) {
+                        // Already in the correct format
+                    } else {
+                        // Convert to YYYY-MM-DD
+                        newItem.expiration = new Date(newItem.expiration).toISOString().split('T')[0];
+                    }
+                }
+                
+                return newItem;
+            });
+        }
         
         state.lastUpdateTime = new Date();
         state.lastProcessedDates = data.processed_dates || 0;

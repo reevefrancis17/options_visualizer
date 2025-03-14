@@ -229,84 +229,48 @@ def get_options_data_by_ticker(ticker):
     This endpoint is used by the frontend to fetch options data.
     """
     try:
-        logger.info(f"Received request for options data for ticker: {ticker}")
+        # Get expiry parameter if provided
+        expiry = request.args.get('expiry')
         
-        # Initialize the data manager if not already done
-        if not hasattr(app, 'data_manager'):
-            logger.info("Creating new OptionsDataManager instance")
-            app.data_manager = OptionsDataManager()
+        # Construct the backend API URL
+        backend_url = os.environ.get('BACKEND_URL', 'http://localhost:5002')
+        api_url = f"{backend_url}/api/options/{ticker}"
+        if expiry:
+            api_url += f"?expiry={expiry}"
         
-        # Get the options data
-        data_manager = app.data_manager
-        
-        # Check if we have data for this ticker
-        logger.info(f"Getting current processor for {ticker}")
-        processor, current_price, status, progress = data_manager.get_current_processor(ticker)
-        logger.info(f"Status for {ticker}: {status}, progress: {progress}, processor: {processor is not None}, price: {current_price}")
-        
-        # If no data or still loading
-        if status == 'loading' or not processor:
-            # Start loading data in the background if not already loading
-            if status != 'loading':
-                logger.info(f"Starting fetch for {ticker}")
-                data_manager.start_fetching(ticker)
+        try:
+            # Make request to backend API
+            response = requests.get(api_url, timeout=30)
             
-            # Get loading state
-            loading_state = data_manager._loading_state.get(ticker, {})
-            processed_dates = loading_state.get('processed_dates', 0)
-            total_dates = loading_state.get('total_dates', 0)
-            logger.info(f"Loading state for {ticker}: processed_dates={processed_dates}, total_dates={total_dates}")
+            # Check if the request was successful
+            if response.status_code == 200:
+                # Return the data from the backend
+                return jsonify(response.json())
+            else:
+                # Return the error from the backend
+                error_data = response.json() if response.content else {"error": f"Backend error: {response.status_code}"}
+                return jsonify(error_data), response.status_code
+                
+        except requests.exceptions.Timeout:
+            # Handle timeout errors
+            logger.error(f"Timeout connecting to backend API at {api_url}")
+            return jsonify({"error": "Backend request timed out. Please try again later."}), 504
             
-            # Return a loading status
-            return jsonify({
-                'status': 'loading',
-                'progress': progress,
-                'processed_dates': processed_dates,
-                'total_dates': total_dates,
-                'message': f'Loading data for {ticker}...'
-            })
-        
-        # If we have partial data
-        if status == 'partial':
-            # Get the data
-            logger.info(f"Getting partial data for {ticker}")
-            options_data = processor.get_data()
-            expiry_dates = processor.get_expirations()
-            logger.info(f"Got {len(expiry_dates)} expiry dates and options data: {options_data is not None}")
+        except requests.exceptions.ConnectionError:
+            # Handle connection errors
+            logger.error(f"Connection error to backend API at {api_url}")
+            return jsonify({"error": "Could not connect to backend service. Please try again later."}), 503
             
-            # Get loading state
-            loading_state = data_manager._loading_state.get(ticker, {})
-            processed_dates = loading_state.get('processed_dates', 0)
-            total_dates = loading_state.get('total_dates', 0)
+        except requests.exceptions.RequestException as e:
+            # Handle other request exceptions
+            logger.error(f"Request exception when connecting to backend API: {str(e)}")
+            return jsonify({"error": f"Error making request to backend: {str(e)}"}), 500
             
-            return jsonify({
-                'status': 'partial',
-                'symbol': ticker,
-                'current_price': current_price,
-                'expiry_dates': expiry_dates,
-                'options_data': options_data,
-                'processed_dates': processed_dates,
-                'total_dates': total_dates
-            })
-        
-        # Return complete data
-        logger.info(f"Getting complete data for {ticker}")
-        options_data = processor.get_data()
-        expiry_dates = processor.get_expirations()
-        logger.info(f"Got {len(expiry_dates)} expiry dates and options data: {options_data is not None}")
-        
-        return jsonify({
-            'status': 'complete',
-            'symbol': ticker,
-            'current_price': current_price,
-            'expiry_dates': expiry_dates,
-            'options_data': options_data
-        })
-    
     except Exception as e:
-        logger.error(f"Error processing request for ticker {ticker}: {str(e)}")
+        # Handle any other exceptions
+        logger.error(f"Error in get_options_data_by_ticker: {str(e)}")
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 # Add health check endpoint
 @app.route('/health', methods=['GET'])

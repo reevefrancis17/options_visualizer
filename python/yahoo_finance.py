@@ -12,6 +12,14 @@ import requests
 # Set up logger - Use existing logger without adding a duplicate handler
 logger = logging.getLogger(__name__)
 
+class TickerNotFoundError(Exception):
+    """Exception raised when a ticker symbol is not found."""
+    pass
+
+class NoOptionsDataError(Exception):
+    """Exception raised when a ticker has no options data."""
+    pass
+
 class YahooFinanceAPI:
     def __init__(self, cache_duration=600, max_workers=4):
         """Initialize the Yahoo Finance API wrapper.
@@ -73,6 +81,11 @@ class YahooFinanceAPI:
         except Exception as info_error:
             logger.warning(f"Error getting price from info for {ticker}: {str(info_error)}")
             
+            # Check for 404 error which indicates ticker doesn't exist
+            if "404 Client Error" in str(info_error):
+                logger.error(f"Ticker {ticker} not found (404 error)")
+                raise TickerNotFoundError(f"Ticker {ticker} not found")
+            
             # Try to get price from history as a fallback
             try:
                 hist = stock.history(period="1d")
@@ -81,9 +94,16 @@ class YahooFinanceAPI:
                     logger.info(f"Got current price from history for {ticker}: {price}")
                     return price
                 else:
-                    raise ValueError("History data is empty")
+                    # Empty history often means the ticker doesn't exist
+                    logger.error(f"Empty history data for {ticker}, ticker may not exist")
+                    raise TickerNotFoundError(f"Ticker {ticker} not found (empty history)")
             except Exception as hist_error:
                 logger.error(f"Error getting price from history for {ticker}: {str(hist_error)}")
+                
+                # Check for specific error messages that indicate ticker doesn't exist
+                if "possibly delisted" in str(hist_error) or "No data found" in str(hist_error):
+                    raise TickerNotFoundError(f"Ticker {ticker} not found or delisted")
+                
                 raise ValueError(f"Failed to get price for {ticker}")
 
     def _process_expiry_date(self, stock, ticker, expiry, processed_dates, total_dates):
@@ -100,18 +120,26 @@ class YahooFinanceAPI:
                 'contractSymbol', 'lastTradeDate', 'contractSize', 'currency'
             ]
             
-            # Filter columns for calls
-            calls_df = opt.calls
-            calls_columns = [col for col in essential_columns if col in calls_df.columns]
-            calls = calls_df[calls_columns].to_dict('records')
+            # Filter columns that actually exist in the DataFrame
+            calls_columns = [col for col in essential_columns if col in opt.calls.columns]
+            puts_columns = [col for col in essential_columns if col in opt.puts.columns]
             
-            # Filter columns for puts
-            puts_df = opt.puts
-            puts_columns = [col for col in essential_columns if col in puts_df.columns]
-            puts = puts_df[puts_columns].to_dict('records')
+            # Convert to records
+            calls = opt.calls[calls_columns].to_dict('records')
+            puts = opt.puts[puts_columns].to_dict('records')
             
-            logger.info(f"Processed expiry date {expiry} for {ticker}: {len(calls)} calls, {len(puts)} puts")
+            # Add expiration date to each record
+            for call in calls:
+                call['expiration'] = expiry
+            for put in puts:
+                put['expiration'] = expiry
+                
+            # Update progress if callback is provided
+            if processed_dates is not None and total_dates is not None:
+                progress = processed_dates / total_dates
+                logger.debug(f"Processed {processed_dates}/{total_dates} dates for {ticker} ({progress:.1%})")
             
+            # Return the processed data
             return {
                 'expiry': expiry,
                 'data': {
@@ -121,8 +149,10 @@ class YahooFinanceAPI:
                 'processed': processed_dates,
                 'total': total_dates
             }
+            
         except Exception as e:
             logger.error(f"Error processing expiry date {expiry} for {ticker}: {str(e)}")
+            # Return empty data with error message
             return {
                 'expiry': expiry,
                 'data': {
@@ -134,19 +164,14 @@ class YahooFinanceAPI:
                 'total': total_dates
             }
 
-    def get_options_data(self, ticker, progress_callback: Optional[Callable[[Dict, float, int, int], None]] = None, max_dates=None):
-        """
-        Fetch options data for a ticker with progressive loading and parallel processing.
+    def get_options_data(self, ticker, progress_callback=None, max_dates=None):
+        """Get options data for a ticker.
         
         Args:
-            ticker: The stock ticker symbol
-            progress_callback: Optional callback function that receives:
-                - current_data: The data fetched so far
-                - current_price: The stock's current price
-                - processed_dates: Number of expiration dates processed so far
-                - total_dates: Total number of expiration dates found
-            max_dates: Maximum number of expiration dates to fetch (default: None, fetch all dates)
-        
+            ticker: The ticker symbol
+            progress_callback: Optional callback function to report progress
+            max_dates: Maximum number of expiration dates to fetch
+            
         Returns:
             Tuple of (options_data, current_price)
         """
@@ -168,7 +193,7 @@ class YahooFinanceAPI:
                 expiry_dates = stock.options
                 if not expiry_dates:
                     logger.error(f"No expiration dates found for {ticker}")
-                    raise ValueError(f"No options data available for {ticker}")
+                    raise NoOptionsDataError(f"No options data available for {ticker}")
                 
                 logger.info(f"Found {len(expiry_dates)} expiration dates for {ticker}")
                 
@@ -198,57 +223,88 @@ class YahooFinanceAPI:
                     }
                     
                     # Process results as they complete
+                    processed_dates = 0
                     for future in concurrent.futures.as_completed(future_to_expiry):
                         expiry = future_to_expiry[future]
                         try:
                             result = future.result()
+                            # Store the result
+                            if result['expiry'] in options_data:
+                                # Merge data if we already have some for this expiry
+                                options_data[result['expiry']]['calls'].extend(result['data']['calls'])
+                                options_data[result['expiry']]['puts'].extend(result['data']['puts'])
+                            else:
+                                # Store new data
+                                options_data[result['expiry']] = result['data']
                             
-                            # Add to options data
-                            if result and 'data' in result:
-                                options_data[expiry] = result['data']
-                                
-                                # Call progress callback if provided
-                                if progress_callback:
-                                    processed_dates = result['processed']
+                            processed_dates += 1
+                            
+                            # Update progress if callback is provided
+                            if progress_callback:
+                                try:
+                                    # Call the callback with the partial data, current price, processed dates, and total dates
                                     progress_callback(options_data, current_price, processed_dates, total_dates)
+                                except Exception as callback_error:
+                                    logger.error(f"Error in progress_callback for {ticker}: {str(callback_error)}")
                             
                         except Exception as e:
                             logger.error(f"Error processing future for {expiry}: {str(e)}")
                 
-                # Return the data we have
+                # Add metadata
+                options_data['_ticker'] = ticker
+                options_data['_current_price'] = current_price
+                options_data['_expiration_dates'] = expiry_dates
+                
+                # Check if we have any valid data
+                valid_data = False
+                for expiry in expiry_dates:
+                    if expiry in options_data and options_data[expiry]['calls'] and options_data[expiry]['puts']:
+                        valid_data = True
+                        break
+                
+                if not valid_data:
+                    logger.error(f"No valid options data found for {ticker}")
+                    raise NoOptionsDataError(f"No valid options data found for {ticker}")
+                
+                # Return the data
                 return options_data, current_price
                 
+            except (TickerNotFoundError, NoOptionsDataError) as e:
+                # Don't retry for these specific errors
+                logger.error(f"{str(e)}")
+                raise
+                
             except Exception as e:
-                logger.error(f"Error in attempt {attempt + 1} for {ticker}: {str(e)}")
+                logger.error(f"Error in attempt {attempt+1} for {ticker}: {str(e)}")
                 if attempt < self.max_retries - 1:
-                    logger.info(f"Retrying {ticker} (attempt {attempt + 1}/{self.max_retries})")
+                    # Wait before retrying
                     time.sleep(self.retry_delay)
                 else:
                     logger.error(f"All {self.max_retries} attempts failed for {ticker}")
                     raise
         
-        # If we get here, all attempts failed
-        return None, None
-        
-    def get_batch_options_data(self, tickers: List[str], max_dates=None):
-        """
-        Fetch options data for multiple tickers in parallel.
+        # This should never be reached due to the exception handling above
+        raise ValueError(f"Failed to get options data for {ticker} after {self.max_retries} attempts")
+
+    def get_batch_options_data(self, tickers, progress_callback=None, max_dates=None):
+        """Get options data for multiple tickers in parallel.
         
         Args:
             tickers: List of ticker symbols
+            progress_callback: Optional callback function to report progress
             max_dates: Maximum number of expiration dates to fetch per ticker
             
         Returns:
-            Dict mapping tickers to (options_data, current_price) tuples
+            Dictionary mapping tickers to options data
         """
         logger.info(f"Fetching batch data for {len(tickers)} tickers")
         
         results = {}
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, len(tickers))) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all tasks
             future_to_ticker = {
-                executor.submit(self.get_options_data, ticker, None, max_dates): ticker 
+                executor.submit(self.get_options_data, ticker, progress_callback, max_dates): ticker 
                 for ticker in tickers
             }
             
@@ -256,11 +312,13 @@ class YahooFinanceAPI:
             for future in concurrent.futures.as_completed(future_to_ticker):
                 ticker = future_to_ticker[future]
                 try:
-                    options_data, current_price = future.result()
-                    results[ticker] = (options_data, current_price)
-                    logger.info(f"Completed batch fetch for {ticker}")
+                    data = future.result()
+                    results[ticker] = data
+                except (TickerNotFoundError, NoOptionsDataError) as e:
+                    # Store the error in the results
+                    results[ticker] = (None, str(e))
                 except Exception as e:
-                    logger.error(f"Error in batch fetch for {ticker}: {str(e)}")
-                    results[ticker] = (None, None)
+                    logger.error(f"Error getting data for {ticker}: {str(e)}")
+                    results[ticker] = (None, str(e))
         
         return results

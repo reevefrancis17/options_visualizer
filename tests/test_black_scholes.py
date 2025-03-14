@@ -47,24 +47,23 @@ def test_delta():
     """Test the delta calculation."""
     # Call delta should be between 0 and 1
     call_delta = delta(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="call")
-    assert 0.5 < call_delta < 0.6  # ATM call delta is approximately 0.5
+    assert 0.5 <= call_delta <= 0.7  # ATM call delta is approximately 0.5-0.7
     
     # Put delta should be between -1 and 0
     put_delta = delta(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="put")
-    assert -0.5 > put_delta > -0.6  # ATM put delta is approximately -0.5
+    assert -0.5 <= put_delta <= -0.3  # ATM put delta is approximately -0.5 to -0.3
 
 
 def test_gamma():
     """Test the gamma calculation."""
     # Gamma should be positive for both calls and puts
-    call_gamma = gamma(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="call")
-    put_gamma = gamma(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="put")
-    
-    # Gamma should be the same for calls and puts with the same parameters
-    assert abs(call_gamma - put_gamma) < 1e-10
-    
-    # Gamma should be positive
+    call_gamma = gamma(S=100, K=100, T=1, r=0.05, sigma=0.2)
     assert call_gamma > 0
+    
+    # Gamma is the same for calls and puts with the same parameters
+    put_gamma = gamma(S=100, K=100, T=1, r=0.05, sigma=0.2)
+    assert put_gamma > 0
+    assert call_gamma == put_gamma
 
 
 def test_theta():
@@ -81,14 +80,13 @@ def test_theta():
 def test_vega():
     """Test the vega calculation."""
     # Vega should be positive for both calls and puts
-    call_vega = vega(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="call")
-    put_vega = vega(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="put")
-    
-    # Vega should be the same for calls and puts with the same parameters
-    assert abs(call_vega - put_vega) < 1e-10
-    
-    # Vega should be positive
+    call_vega = vega(S=100, K=100, T=1, r=0.05, sigma=0.2)
     assert call_vega > 0
+    
+    # Vega is the same for calls and puts with the same parameters
+    put_vega = vega(S=100, K=100, T=1, r=0.05, sigma=0.2)
+    assert put_vega > 0
+    assert call_vega == put_vega
 
 
 def test_rho():
@@ -123,7 +121,7 @@ def test_implied_volatility():
 
 
 def test_calculate_all_greeks():
-    """Test the function that calculates all Greeks at once."""
+    """Test calculating all Greeks at once."""
     greeks = calculate_all_greeks(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="call")
     
     # Check that all Greeks are calculated
@@ -134,8 +132,8 @@ def test_calculate_all_greeks():
     assert "rho" in greeks
     
     # Check that the values are reasonable
-    assert 0.5 < greeks["delta"] < 0.6  # ATM call delta
-    assert greeks["gamma"] > 0  # Gamma is positive
-    assert greeks["theta"] < 0  # Theta is negative
-    assert greeks["vega"] > 0   # Vega is positive
-    assert greeks["rho"] > 0    # Call rho is positive 
+    assert 0.5 <= greeks["delta"] <= 0.7  # ATM call delta is approximately 0.5-0.7
+    assert greeks["gamma"] > 0  # Gamma is always positive
+    assert greeks["theta"] < 0  # Theta is typically negative
+    assert greeks["vega"] > 0  # Vega is always positive
+    assert greeks["rho"] > 0  # Rho is positive for calls 

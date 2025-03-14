@@ -14,7 +14,7 @@ import math
 from typing import Dict, Optional, Callable, Tuple, List, Any, Union
 
 # Import the finance API and models
-from python.yahoo_finance import YahooFinanceAPI
+from python.yahoo_finance import YahooFinanceAPI, TickerNotFoundError, NoOptionsDataError
 from python.models.black_scholes import (
     call_price, put_price, delta, gamma, theta, vega, rho, implied_volatility, calculate_all_greeks
 )
@@ -306,6 +306,28 @@ class OptionsDataManager:
                     # Use the cache's ticker lock for thread safety during API fetch
                     with self._cache.get_lock(ticker):
                         options_data_dict, current_price = self.api.get_options_data(ticker, cache_update_callback)
+                except TickerNotFoundError as e:
+                    logger.error(f"Ticker not found error: {str(e)}")
+                    # Set specific error state for non-existent tickers
+                    if ticker in self._loading_state:
+                        self._loading_state[ticker] = {
+                            'status': 'error',
+                            'error': str(e),
+                            'error_type': 'ticker_not_found',
+                            'progress': 1.0  # Mark as complete to avoid retries
+                        }
+                    return
+                except NoOptionsDataError as e:
+                    logger.error(f"No options data error: {str(e)}")
+                    # Set specific error state for tickers without options
+                    if ticker in self._loading_state:
+                        self._loading_state[ticker] = {
+                            'status': 'error',
+                            'error': str(e),
+                            'error_type': 'no_options_data',
+                            'progress': 1.0  # Mark as complete to avoid retries
+                        }
+                    return
                 except Exception as fetch_error:
                     logger.error(f"Error fetching data from API for {ticker}: {str(fetch_error)}")
                     logger.error(traceback.format_exc())
@@ -326,9 +348,14 @@ class OptionsDataManager:
                         else:
                             # No data available
                             logger.error(f"No data available for {ticker} after API error")
-                            # Clean up loading state
+                            # Set generic error state
                             if ticker in self._loading_state:
-                                del self._loading_state[ticker]
+                                self._loading_state[ticker] = {
+                                    'status': 'error',
+                                    'error': str(fetch_error),
+                                    'error_type': 'api_error',
+                                    'progress': 1.0  # Mark as complete to avoid retries
+                                }
                             return
                 
                 # Now process all the collected data at once

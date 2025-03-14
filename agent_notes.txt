@@ -661,3 +661,113 @@ These improvements significantly enhance the accuracy and reliability of the Gre
 - The cache manager properly handles database migrations and recovery
 - Error handling has been improved to handle cases where the timestamp column might be missing or null
 - The ticker registry now only grows over time, never removing tickers even when they're removed from the cache
+
+# Cache Management and Client Serving Thread Separation
+
+## Overview
+The application has been updated to ensure that cache management and client serving run in separate threads without blocking each other. This improves performance and responsiveness by allowing the frontend and backend to serve requests immediately from the cache while cache updates happen asynchronously in the background.
+
+## Changes Made
+
+1. **Dedicated Cache Management Thread**
+   - Created a new `run_cache_manager` function that runs in a dedicated thread
+   - Implemented a thread-safe queue for cache operations
+   - Cache operations are now processed asynchronously without blocking client requests
+
+2. **Non-Blocking Client Serving**
+   - Frontend and backend threads now only read from the cache
+   - Cache write operations are delegated to the cache manager thread via the queue
+   - Monkey-patched the options_data_manager methods to use the queue for cache operations
+
+3. **Thread Synchronization**
+   - Used a thread-safe queue for communication between threads
+   - Added proper shutdown handling for the cache manager thread
+   - Ensured all threads can run concurrently without race conditions
+
+4. **Testing**
+   - Added new tests for the cache thread implementation
+   - Updated existing tests to account for the new threading model
+   - Verified that all tests pass with the new implementation
+
+## Benefits
+
+1. **Improved Responsiveness**
+   - Client requests are served immediately from the cache
+   - Cache updates happen in the background without blocking client requests
+   - Frontend and backend can continue serving requests even during heavy cache operations
+
+2. **Better Resource Utilization**
+   - Cache operations can utilize a separate CPU core
+   - Network I/O for cache updates doesn't block client requests
+   - More efficient use of system resources
+
+3. **Reduced Latency**
+   - Client requests are processed faster since they don't wait for cache operations
+   - Cache updates don't slow down the frontend or backend
+
+## Implementation Details
+
+1. **Cache Operation Queue**
+   - Thread-safe queue for cache operations
+   - Operations include: refresh_ticker, start_fetching, refresh_all, shutdown
+
+2. **Method Patching**
+   - Original methods: _refresh_ticker, start_fetching
+   - Patched to queue operations instead of performing them directly
+
+3. **Thread Management**
+   - All threads are daemon threads to ensure they exit when the main thread exits
+   - Proper shutdown handling for the cache manager thread
+   - Thread-safe flags to track server status
+
+## Future Improvements
+
+1. **Priority Queue**
+   - Implement priority for cache operations
+   - Higher priority for user-requested operations
+   - Lower priority for background refreshes
+
+2. **More Granular Locking**
+   - Implement per-ticker locking for even better concurrency
+   - Allow multiple tickers to be processed simultaneously
+
+3. **Metrics and Monitoring**
+   - Add metrics for cache hit/miss rates
+   - Monitor queue size and processing times
+   - Implement adaptive cache refresh strategies based on usage patterns
+
+# Cache Thread Callback Fix
+
+## Problem Identified
+When we moved cache management to a separate thread using a queue-based approach, we introduced an error in the Yahoo Finance API callback function. The error message was:
+
+```
+Error processing future for 2025-03-14: OptionsDataManager._fetch_in_background.<locals>.cache_update_callback() missing 1 required positional argument: 'total_dates'
+```
+
+This occurred because the callback function in the Yahoo Finance API was not passing the `total_dates` parameter to the callback function.
+
+## Root Cause Analysis
+1. In the original implementation, the `_fetch_in_background` method in `OptionsDataManager` defined a callback function that expected 4 parameters: `partial_data`, `current_price`, `processed_dates`, and `total_dates`.
+2. However, in the `get_options_data` method of `YahooFinanceAPI`, the callback was being called with only 3 parameters: `ticker`, `progress`, and `expiry_dates`.
+3. When we moved to the queue-based approach, this mismatch in parameter count caused the error.
+
+## Solution Implemented
+1. Updated the `get_options_data` method in `YahooFinanceAPI` to call the callback with the correct parameters:
+   - Changed from: `progress_callback(ticker, progress, expiry_dates)`
+   - To: `progress_callback(options_data, current_price, processed_dates, total_dates)`
+2. Added error handling around the callback to ensure that errors in the callback don't prevent data processing.
+3. Created comprehensive tests to verify the fix:
+   - `test_callback_with_correct_parameters`: Verifies that the callback is called with the correct parameters
+   - `test_callback_error_handling`: Verifies that errors in the callback are handled gracefully
+   - `test_callback_with_queue_based_approach`: Verifies that the callback works with the queue-based approach
+
+## Benefits
+1. **Fixed the Error**: The application now correctly processes options data without the callback error.
+2. **Improved Error Handling**: Added better error handling around callbacks to prevent similar issues in the future.
+3. **Better Test Coverage**: Added tests specifically for the callback functionality to catch similar issues early.
+
+## Lessons Learned
+1. When refactoring code to use a different threading model, it's important to carefully review all callback functions and ensure they're compatible with the new approach.
+2. Adding proper error handling around callbacks is essential to prevent errors in callbacks from affecting the main functionality.
+3. Writing tests specifically for callback functionality helps catch issues early and ensures the code works as expected.
