@@ -60,7 +60,6 @@ narwhals==1.26.0
 nest-asyncio==1.6.0
 netCDF4==1.7.2
 numpy==2.2.2
--e git+ssh://git@github.com/reevefrancis17/options_visualizer.git@c58c5cc2374aa8e91889db68479b6f099cb53e7b#egg=options_visualizer
 ordered-set==4.1.0
 outcome==1.3.0.post0
 packaging==24.2
