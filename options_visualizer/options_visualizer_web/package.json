@@ -1,0 +1,13 @@
+{
+  "name": "options-visualizer-web",
+  "version": "1.0.0",
+  "description": "Frontend for Options Visualizer",
+  "scripts": {
+    "lint": "eslint static/js",
+    "format": "prettier --write static/js static/css"
+  },
+  "devDependencies": {
+    "eslint": "^8.38.0",
+    "prettier": "^2.8.7"
+  }
+} 
