@@ -1,0 +1,16 @@
+{
+  "name": "options-visualizer",
+  "version": "0.1.0",
+  "description": "A web application for visualizing stock options data",
+  "private": true,
+  "scripts": {
+    "lint": "eslint options_visualizer_web/static/js/",
+    "format": "prettier --write options_visualizer_web/static/js/ options_visualizer_web/static/css/",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.1.1"
+  }
+} 
