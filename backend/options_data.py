@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 from scipy.interpolate import griddata
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import traceback
 import os
@@ -19,11 +19,11 @@ import concurrent.futures
 from typing import Dict, Optional, Callable, Tuple, List, Any, Union
 
 # Import the finance API and models
-from options_visualizer_backend.yahoo_finance import YahooFinanceAPI
-from options_visualizer_backend.models.black_scholes import (
+from backend.yahoo_finance import YahooFinanceAPI
+from backend.models.black_scholes import (
     call_price, put_price, delta, gamma, theta, vega, rho, implied_volatility, calculate_all_greeks
 )
-from options_visualizer_backend.utils.cache_manager import OptionsCache
+from backend.utils.cache_manager import OptionsCache
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -52,6 +52,9 @@ class OptionsDataManager:
         self._cache = OptionsCache(cache_duration=cache_duration)
         self._loading_state = {}
         self._fetch_locks = {}
+        
+        # Store the max_workers value
+        self.max_workers = max_workers
         
         # Initialize thread pool for concurrent processing
         # If max_workers is None, it will default to min(32, os.cpu_count() + 4)
@@ -680,7 +683,84 @@ class OptionsDataManager:
         raise ValueError(f"Unsupported pricing model: {self.pricing_model}")
 
     def calculate_implied_volatility(self, market_price: float, S: float, K: float, T: float, r: float, option_type: str) -> float:
+        """Calculate implied volatility for an option."""
         return implied_volatility(market_price, S, K, T, r, option_type)
+
+    def get_expiration_dates(self, ticker: str) -> List[str]:
+        """
+        Get available expiration dates for a ticker.
+        
+        Args:
+            ticker: The stock ticker symbol
+            
+        Returns:
+            List of expiration dates as strings or empty list if not found
+        """
+        try:
+            if not self.api:
+                logger.warning(f"No API available to fetch expiration dates for {ticker}")
+                return []
+                
+            return self.api.get_expiration_dates(ticker) or []
+        except Exception as e:
+            logger.error(f"Error fetching expiration dates for {ticker}: {str(e)}")
+            logger.error(traceback.format_exc())
+            return []
+
+    def filter_by_dte(self, df: pd.DataFrame, min_dte: Optional[int] = None, max_dte: Optional[int] = None) -> pd.DataFrame:
+        """
+        Filter options by days to expiration (DTE).
+        
+        Args:
+            df: DataFrame containing options data
+            min_dte: Minimum days to expiration (inclusive)
+            max_dte: Maximum days to expiration (inclusive)
+            
+        Returns:
+            Filtered DataFrame
+        """
+        if df is None or df.empty:
+            return df
+            
+        # Ensure expiration column is datetime
+        if 'expiration' not in df.columns:
+            logger.warning("No expiration column found in DataFrame")
+            return df
+            
+        today = datetime.now().date()
+        
+        # Create a new DataFrame to avoid modifying the original
+        result_df = df.copy()
+        
+        # Convert expiration to datetime if it's not already
+        if not pd.api.types.is_datetime64_any_dtype(result_df['expiration']):
+            # If the expiration column contains timedelta objects, convert them to days directly
+            if isinstance(result_df['expiration'].iloc[0], timedelta):
+                result_df['dte'] = result_df['expiration'].apply(lambda x: x.days)
+            else:
+                # Try to convert to datetime
+                try:
+                    result_df['expiration'] = pd.to_datetime(result_df['expiration']).dt.date
+                    result_df['dte'] = [(exp - today).days for exp in result_df['expiration']]
+                except Exception as e:
+                    logger.error(f"Error converting expiration to datetime: {str(e)}")
+                    return df
+        else:
+            # Handle datetime column
+            if hasattr(result_df['expiration'], 'dt'):
+                result_df['expiration'] = result_df['expiration'].dt.date
+                result_df['dte'] = [(exp - today).days for exp in result_df['expiration']]
+            else:
+                logger.error("Expiration column is not properly formatted as datetime")
+                return df
+            
+        # Apply filters
+        if min_dte is not None:
+            result_df = result_df[result_df['dte'] >= min_dte]
+        if max_dte is not None:
+            result_df = result_df[result_df['dte'] <= max_dte]
+            
+        return result_df
 
 class OptionsDataProcessor:
     """Processes raw options data into an xarray Dataset."""
@@ -1523,7 +1603,7 @@ class OptionsDataProcessor:
             S = self.current_price
             
             # Import the Black-Scholes functions
-            from options_visualizer_backend.models.black_scholes import (
+            from backend.models.black_scholes import (
                 delta, gamma, theta, vega, rho
             )
             
@@ -1667,7 +1747,7 @@ class OptionsDataProcessor:
         logger.info("Reverse engineering implied volatility from interpolated market prices")
         
         # Import the implied_volatility function
-        from options_visualizer_backend.models.black_scholes import implied_volatility
+        from backend.models.black_scholes import implied_volatility
         
         # Get current price and risk-free rate
         S = self.current_price
@@ -2030,7 +2110,7 @@ class OptionsDataProcessor:
                                 # Calculate option prices at different underlying prices
                                 for k, underlying_price in enumerate(underlying_prices):
                                     # Use Black-Scholes to calculate option price
-                                    from options_visualizer_backend.models.black_scholes import call_price, put_price
+                                    from backend.models.black_scholes import call_price, put_price
                                     if opt_type == 'call':
                                         option_prices[i, j, k] = call_price(underlying_price, strike, T, r, sigma)
                                     else:
@@ -2120,7 +2200,7 @@ class OptionsDataProcessor:
                                 # Calculate option prices at different underlying prices
                                 for k, underlying_price in enumerate(underlying_prices):
                                     # Use Black-Scholes to calculate option price
-                                    from options_visualizer_backend.models.black_scholes import call_price, put_price
+                                    from backend.models.black_scholes import call_price, put_price
                                     if opt_type == 'call':
                                         option_prices[i, j, k] = call_price(underlying_price, strike, T, r, sigma)
                                     else:
@@ -2201,7 +2281,7 @@ class OptionsDataProcessor:
                                 r = self.get_risk_free_rate()
                                 
                                 # Calculate theta using Black-Scholes
-                                from options_visualizer_backend.models.black_scholes import theta as bs_theta
+                                from backend.models.black_scholes import theta as bs_theta
                                 theta_value = bs_theta(self.current_price, strike, T, r, sigma, opt_type)
                                 
                                 # Store the result (theta is already in daily terms)
@@ -2238,7 +2318,7 @@ class OptionsDataProcessor:
             
         try:
             # Import Black-Scholes functions
-            from options_visualizer_backend.models.black_scholes import call_price, put_price
+            from backend.models.black_scholes import call_price, put_price
             
             # Get current price and risk-free rate
             S = self.current_price
@@ -2315,7 +2395,7 @@ class OptionsDataProcessor:
             
         try:
             # Import Black-Scholes functions
-            from options_visualizer_backend.models.black_scholes import call_price, put_price
+            from backend.models.black_scholes import call_price, put_price
             
             # Get current price and risk-free rate
             S = self.current_price

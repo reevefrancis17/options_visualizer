@@ -3,7 +3,7 @@ Unit tests for the Black-Scholes option pricing model.
 """
 import pytest
 import numpy as np
-from options_visualizer_backend.models.black_scholes import (
+from backend.models.black_scholes import (
     call_price, put_price, delta, gamma, theta, vega, rho, 
     implied_volatility, calculate_all_greeks
 )
@@ -47,11 +47,11 @@ def test_delta():
     """Test the delta calculation."""
     # Call delta should be between 0 and 1
     call_delta = delta(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="call")
-    assert 0.5 < call_delta < 0.6  # ATM call delta is approximately 0.5
+    assert 0.5 < call_delta < 0.7  # ATM call delta is approximately 0.5-0.6
     
     # Put delta should be between -1 and 0
     put_delta = delta(S=100, K=100, T=1, r=0.05, sigma=0.2, option_type="put")
-    assert -0.5 > put_delta > -0.6  # ATM put delta is approximately -0.5
+    assert -0.3 > put_delta > -0.5  # ATM put delta is approximately -0.36
 
 
 def test_gamma():
@@ -134,7 +134,7 @@ def test_calculate_all_greeks():
     assert "rho" in greeks
     
     # Check that the values are reasonable
-    assert 0.5 < greeks["delta"] < 0.6  # ATM call delta
+    assert 0.5 < greeks["delta"] < 0.7  # ATM call delta
     assert greeks["gamma"] > 0  # Gamma is positive
     assert greeks["theta"] < 0  # Theta is negative
     assert greeks["vega"] > 0   # Vega is positive

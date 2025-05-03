@@ -10,8 +10,7 @@ from flask import Flask
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import the Flask applications
-from options_visualizer_backend.app import app as backend_app
-from options_visualizer_web.app import app as frontend_app
+from backend.app import app as backend_app
 
 
 @pytest.fixture
@@ -21,16 +20,6 @@ def backend_client():
     """
     backend_app.config['TESTING'] = True
     with backend_app.test_client() as client:
-        yield client
-
-
-@pytest.fixture
-def frontend_client():
-    """
-    Flask test client for the frontend web application.
-    """
-    frontend_app.config['TESTING'] = True
-    with frontend_app.test_client() as client:
         yield client
 
 

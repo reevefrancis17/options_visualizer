@@ -13,7 +13,7 @@ import time
 import signal
 import subprocess
 import webbrowser
-from options_visualizer_backend.app import app as combined_app
+from backend.app import app as combined_app
 from python.options_data import OptionsDataManager
 
 # Initialize the options data manager with a 10-minute cache duration

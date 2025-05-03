@@ -11,17 +11,13 @@ import argparse
 import logging
 from datetime import datetime
 
-# Add the project root to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 # Import the cache manager
-from python.cache_manager import OptionsCache
+from backend.utils.cache_manager import OptionsCache
 
 # Configure logging
 logging.basicConfig(
-    level=logging.WARNING,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 

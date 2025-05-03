@@ -800,17 +800,22 @@ def test_processed_data_caching(mock_cache):
     # Test setting raw data
     mock_cache.set("TEST_RAW", raw_data, current_price=100.0, processed_dates=5, total_dates=10)
     
-    # Test setting processed data
-    mock_cache.set("TEST_PROCESSED", raw_data, current_price=100.0, processed_dates=5, total_dates=10, processed_dataset=processed_data)
+    # Test setting processed data with updated method signature
+    mock_cache.set("TEST_PROCESSED", processed_data, current_price=100.0, processed_dates=10, total_dates=10)
     
-    # Retrieve raw data
-    raw_result = mock_cache.get("TEST_RAW")
-    assert raw_result["data"] == raw_data["data"]
-    assert "_is_fully_processed" not in raw_data  # Original data unchanged
+    # Retrieve raw data - get() returns a tuple (data, current_price, timestamp, age, processed_dates, total_dates)
+    raw_result_tuple = mock_cache.get("TEST_RAW")
+    raw_result = raw_result_tuple[0]  # Get just the data part of the tuple
+    assert raw_result is not None
+    assert isinstance(raw_result, dict)
+    assert raw_result["data"] == "raw_test_data"
     
     # Retrieve processed data
-    processed_result = mock_cache.get("TEST_PROCESSED")
-    assert processed_result["data"] == raw_data["data"]
+    processed_result_tuple = mock_cache.get("TEST_PROCESSED")
+    processed_result = processed_result_tuple[0]  # Get just the data part of the tuple
+    assert processed_result is not None
+    assert isinstance(processed_result, dict)
+    assert processed_result["data"] == "processed_test_data"
     assert "_is_fully_processed" in processed_result
     assert processed_result["_is_fully_processed"] is True
 

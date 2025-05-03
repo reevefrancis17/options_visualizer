@@ -12,24 +12,14 @@ A web application for visualizing stock options data fetched from Yahoo Finance.
 
 ```
 options_visualizer/
-├── options_visualizer_web/    # Frontend
-│   ├── static/                # CSS, JavaScript, and other static assets
-│   ├── templates/             # HTML templates
-│   └── app.py                 # Frontend Flask application
-├── options_visualizer_backend/ # Backend
-│   ├── models/                # Pricing models and data logic
-│   │   ├── black_scholes.py   # Black-Scholes option pricing model
-│   │   └── yahoo_finance.py   # Yahoo Finance data fetching
-│   ├── cache/                 # Cached data storage
-│   ├── data/                  # Data storage and processing
-│   │   └── ticker_registry.json # Persistent registry of all tickers
-│   ├── utils/                 # Utility functions
-│   └── app.py                 # Backend Flask API server
-├── python/                    # Shared utilities
-│   ├── options_data.py        # Options data processing
-│   ├── cache_manager.py       # Cache management utilities
-│   └── options_preprocessor.py # Data preprocessing utilities
-└── README.md                  # This file
+├── python/           # Core Python modules
+├── frontend/         # Frontend code
+├── backend/          # Backend
+├── tests/            # Test files
+├── data/             # Data files
+├── cache/            # Cache files
+├── main.py           # Main entry point
+└── README.md         # This file
 ```
 
 ## Ticker Registry and Caching System
@@ -110,30 +100,28 @@ The application includes a sophisticated ticker registry and caching system:
      flake8 .
      ```
 
-## Running the Application in Test Environment
+## Running the Application
 
-The application consists of two separate components:
-1. **Backend API Server**: Fetches and processes options data
-2. **Frontend Web Server**: Serves the web interface
+### Using the Combined App
 
-To run both components for testing:
-
-### Step 1: Start the Backend API Server
 ```bash
-python -m options_visualizer_backend.app
+python main.py
 ```
-This will start the backend server on port 5002 (http://localhost:5002).
 
-### Step 2: Start the Frontend Web Server
+This will start both the backend and frontend together and open the web interface in your browser.
+
+### Running Just the Backend
+
 ```bash
-python -m options_visualizer_web.app
+python -m backend.app
 ```
-This will start the frontend server on port 5001 (http://localhost:5001).
 
-### Step 3: Access the Web Application
-Open your browser and navigate to:
-```
-http://localhost:5001
+### Running with Environment Variables
+
+You can configure the application using environment variables:
+
+```bash
+PORT=5003 python -m backend.app
 ```
 
 ## Using the Web Application
@@ -176,7 +164,7 @@ If you encounter any issues:
 1. **Port Conflicts**: If either port 5001 or 5002 is already in use, you can change them:
    ```bash
    # For backend
-   PORT=5003 python -m options_visualizer_backend.app
+   PORT=5003 python -m backend.app
    
    # For frontend (update config.js to point to the new backend port)
    PORT=5004 python -m options_visualizer_web.app

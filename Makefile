@@ -22,12 +22,12 @@ test:
 	python -m pytest tests/
 
 lint:
-	flake8 options_visualizer_backend options_visualizer_web
-	mypy options_visualizer_backend options_visualizer_web
+	flake8 backend
+	mypy backend
 
 format:
-	black options_visualizer_backend options_visualizer_web tests
-	isort options_visualizer_backend options_visualizer_web tests
+	black backend tests
+	isort backend tests
 
 clean:
 	rm -rf build/
@@ -46,7 +46,7 @@ clean:
 	find . -type d -name ".mypy_cache" -exec rm -rf {} +
 
 run-backend:
-	python -m options_visualizer_backend.app
+	python -m backend.app
 
 run-frontend:
 	python -m options_visualizer_web.app

@@ -148,7 +148,7 @@ def delta(S, K, T, r, sigma, option_type):
     else:
         raise ValueError("option_type must be 'call' or 'put'")
 
-def gamma(S, K, T, r, sigma):
+def gamma(S, K, T, r, sigma, option_type=None):
     """
     Calculate option Gamma (second derivative of price with respect to underlying price).
     
@@ -158,6 +158,7 @@ def gamma(S, K, T, r, sigma):
         T: Time to expiration in years
         r: Risk-free interest rate (decimal)
         sigma: Volatility (decimal)
+        option_type: 'call' or 'put' (not used, as gamma is the same for both)
         
     Returns:
         Option gamma value
@@ -209,7 +210,7 @@ def theta(S, K, T, r, sigma, option_type):
     else:
         raise ValueError("option_type must be 'call' or 'put'")
 
-def vega(S, K, T, r, sigma):
+def vega(S, K, T, r, sigma, option_type=None):
     """
     Calculate option Vega (derivative of price with respect to volatility).
     
@@ -219,6 +220,7 @@ def vega(S, K, T, r, sigma):
         T: Time to expiration in years
         r: Risk-free interest rate (decimal)
         sigma: Volatility (decimal)
+        option_type: 'call' or 'put' (not used, as vega is the same for both)
         
     Returns:
         Option vega value (for 1% change in volatility)
@@ -391,9 +393,9 @@ def calculate_all_greeks(S, K, T, r, sigma, option_type):
     return {
         'price': price,
         'delta': delta(S, K, T, r, sigma, option_type),
-        'gamma': gamma(S, K, T, r, sigma),
+        'gamma': gamma(S, K, T, r, sigma, option_type),
         'theta': theta(S, K, T, r, sigma, option_type),
-        'vega': vega(S, K, T, r, sigma),
+        'vega': vega(S, K, T, r, sigma, option_type),
         'rho': rho(S, K, T, r, sigma, option_type)
     }
 

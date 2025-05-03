@@ -14,7 +14,7 @@ import signal
 import subprocess
 import webbrowser
 from options_visualizer_web.app import app as frontend_app
-from options_visualizer_backend.app import app as backend_app
+from backend.app import app as backend_app
 from python.options_data import OptionsDataManager
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
@@ -33,7 +33,7 @@ servers_ready = {
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the FastAPI app
-from options_visualizer_backend.app import app
+from backend.app import app
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C and other termination signals"""

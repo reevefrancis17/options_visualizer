@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 try:
-    from options_visualizer_backend.options_data import OptionsDataManager
+    from backend.options_data import OptionsDataManager
 except ImportError:
     # If the module is not found in the backend directory, try the python directory
     from python.options_data import OptionsDataManager

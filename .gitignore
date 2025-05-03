@@ -33,9 +33,9 @@ ENV/
 .DS_Store
 
 # Project specific
-options_visualizer_backend/cache/
-options_visualizer_backend/data/
-options_visualizer_backend/logs/
+backend/cache/
+backend/data/
+backend/logs/
 *.log
 
 # Environment variables

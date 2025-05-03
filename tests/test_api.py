@@ -4,9 +4,10 @@ Integration tests for the API endpoints.
 import pytest
 import json
 from unittest.mock import patch, MagicMock
+import pandas as pd
 
 
-@patch('options_visualizer_backend.app.OptionsDataManager')
+@patch('backend.options_data.OptionsDataManager')
 def test_options_endpoint(mock_options_manager, backend_client, mock_options_data):
     """Test the options endpoint."""
     # Create a mock for the OptionsDataManager
@@ -17,9 +18,15 @@ def test_options_endpoint(mock_options_manager, backend_client, mock_options_dat
     mock_processor = MagicMock()
     mock_processor.get_data.return_value = mock_options_data
     mock_processor.get_expirations.return_value = ["2023-12-15"]
+    mock_processor.get_data_frame.return_value = pd.DataFrame({
+        'strike': [100.0],
+        'option_type': ['call'],
+        'expiration': [pd.to_datetime('2023-12-15')],
+        'mid_price': [5.0]
+    })
     
     # Set up the mock manager to return our mock processor
-    mock_manager.get_options_data.return_value = (mock_processor, 100.0)
+    mock_manager.get_current_processor.return_value = (mock_processor, 100.0, 'complete', 1.0)
     
     # Make a request to the options endpoint
     response = backend_client.get("/api/options/SPY")
@@ -32,12 +39,12 @@ def test_options_endpoint(mock_options_manager, backend_client, mock_options_dat
     
     # Check that the response contains the expected data
     assert "options_data" in data
-    assert data["options_data"]["ticker"] == "SPY"
-    assert "current_price" in data["options_data"]
-    assert "expiration_dates" in data["options_data"]
+    assert data["ticker"] == "SPY"
+    assert "current_price" in data
+    assert "expiry_dates" in data
 
 
-@patch('options_visualizer_backend.app.OptionsDataManager')
+@patch('backend.options_data.OptionsDataManager')
 def test_options_endpoint_with_expiry(mock_options_manager, backend_client, mock_options_data):
     """Test the options endpoint with a specific expiry date."""
     # Create a mock for the OptionsDataManager
@@ -48,9 +55,15 @@ def test_options_endpoint_with_expiry(mock_options_manager, backend_client, mock
     mock_processor = MagicMock()
     mock_processor.get_data.return_value = mock_options_data
     mock_processor.get_expirations.return_value = ["2023-12-15"]
+    mock_processor.get_data_frame.return_value = pd.DataFrame({
+        'strike': [100.0],
+        'option_type': ['call'],
+        'expiration': [pd.to_datetime('2023-12-15')],
+        'mid_price': [5.0]
+    })
     
     # Set up the mock manager to return our mock processor
-    mock_manager.get_options_data.return_value = (mock_processor, 100.0)
+    mock_manager.get_current_processor.return_value = (mock_processor, 100.0, 'complete', 1.0)
     
     # Make a request to the options endpoint with a specific expiry
     response = backend_client.get("/api/options/SPY?expiry=2023-12-15")
@@ -63,9 +76,9 @@ def test_options_endpoint_with_expiry(mock_options_manager, backend_client, mock
     
     # Check that the response contains the expected data
     assert "options_data" in data
-    assert data["options_data"]["ticker"] == "SPY"
-    assert "current_price" in data["options_data"]
-    assert "expiration_dates" in data["options_data"]
+    assert data["ticker"] == "SPY"
+    assert "current_price" in data
+    assert "expiry_dates" in data
 
 
 def test_health_endpoint(backend_client):
@@ -84,6 +97,7 @@ def test_health_endpoint(backend_client):
     assert data["status"] == "healthy"
 
 
+@pytest.mark.skip(reason="Frontend client no longer available")
 def test_frontend_health_endpoint(frontend_client):
     """Test the frontend health endpoint."""
     # Make a request to the health endpoint
@@ -100,6 +114,7 @@ def test_frontend_health_endpoint(frontend_client):
     assert data["status"] == "healthy"
 
 
+@pytest.mark.skip(reason="Frontend client no longer available")
 def test_frontend_index(frontend_client):
     """Test the frontend index page."""
     # Make a request to the index page
