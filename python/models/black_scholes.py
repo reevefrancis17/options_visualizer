@@ -296,6 +296,8 @@ def implied_volatility(market_price, S, K, T, r, option_type, initial_guess=0.2,
     # Calculate intrinsic value
     intrinsic = max(0, S - K) if option_type == 'call' else max(0, K - S)
     
+    market_price = max(market_price, intrinsic + 1e-6)
+    
     # If market price is less than intrinsic value (arbitrage), return NaN
     if market_price < intrinsic:
         return np.nan

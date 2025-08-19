@@ -661,3 +661,51 @@ These improvements significantly enhance the accuracy and reliability of the Gre
 - The cache manager properly handles database migrations and recovery
 - Error handling has been improved to handle cases where the timestamp column might be missing or null
 - The ticker registry now only grows over time, never removing tickers even when they're removed from the cache
+
+# Log Issues Root Cause and Fixes - 2025-08-17
+
+## Issues Identified
+1. **Qhull Precision Errors in Interpolation**:
+   - Occurring in interpolate_missing_values_2d at line 960.
+   - Caused by degenerate (collinear) points in the (strike, DTE) plane, typically when all valid data points share the same DTE, leading to a constant value in one dimension and failure in Delaunay triangulation.
+
+2. **Too Many Requests Errors from Yahoo Finance API**:
+   - Occurring during fetching of current price and options data for MSTR.
+   - Caused by parallel requests for multiple expiration dates exceeding Yahoo Finance's rate limits.
+   - Retries fail because delays are insufficient.
+
+## Fixes Implemented
+1. **For Qhull Errors**:
+   - Added try-except around griddata calls to catch QhullError and fallback to method='nearest'.
+   - Applied to both interpolate_missing_values_2d and reverse_engineer_iv for consistency.
+   - Imported QhullError from scipy.spatial._qhull.
+
+2. **For Rate Limiting**:
+   - Changed parallel processing of expiration dates to sequential with 0.5 second delay between each.
+   - Increased retry_delay from 2 to 5 seconds for better backoff.
+
+## Learnings
+- When using griddata with 'linear' or 'cubic', check for degenerate cases and have fallbacks.
+- For APIs with rate limits, prefer sequential fetches with delays over parallel, especially when number of requests can be high (e.g., many expiration dates).
+- Monitor and adjust retry mechanisms based on actual API behavior.
+
+## Next Steps
+- Monitor if 'nearest' fallback affects data quality; consider more sophisticated 1D fallback if needed.
+- Implement a proper rate limiter class for YahooFinanceAPI if issues persist.
+- Add tests for degenerate interpolation cases.
+
+# Data Cleaning Improvements - 2025-08-17
+
+## Changes Made
+- Added filtering in _clean_dataframe (options_data.py) to remove contracts with lastTradeDate older than 24 hours from the most recent lastTradeDate in the fetched data.
+- This detects and discards potentially stale or bad data points.
+- Converted lastTradeDate to datetime for proper comparison.
+
+## Rationale
+- Some fetched contracts may have outdated lastTradeDate compared to others, indicating bad or stale data.
+- Filtering ensures only recent trades are used for processing and interpolation.
+
+## Potential Enhancements
+- Make the threshold configurable.
+- Group filtering by expiration date if needed.
+- Add more validation for other fields like volume/openInterest.

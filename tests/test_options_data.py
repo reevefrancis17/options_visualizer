@@ -286,3 +286,49 @@ def test_options_data_processor_compute_greeks(mock_compute_delta, mock_process_
     
     # Put deltas should be between -1 and 0
     assert all(-1 <= delta <= 0 for delta in put_deltas) 
+
+
+@pytest.mark.parametrize("pricing_model", ['black_scholes', 'market'])
+@patch('python.yahoo_finance.YahooFinanceAPI')
+def test_options_data_manager_get_options_data(mock_yahoo_api, pricing_model):
+    manager = OptionsDataManager(pricing_model=pricing_model)
+    processor, current_price = manager.get_options_data('SPY')
+    assert processor is not None
+    assert current_price > 0
+    assert processor.ds is not None
+
+def test_options_data_processor_interpolation(mock_process_data, mock_yahoo_api, sample_options_data):
+    processor = OptionsDataProcessor(sample_options_data, current_price=100.0, skip_interpolation=False)
+    assert processor.ds is not None
+    assert 'interpolated_price' in processor.ds.variables
+
+def test_options_data_processor_compute_greeks_detailed(mock_compute_delta, mock_process_data, mock_yahoo_api, sample_options_data):
+    processor = OptionsDataProcessor(sample_options_data, current_price=100.0)
+    processor.compute_greeks()
+    assert 'delta' in processor.ds.variables
+    assert 'gamma' in processor.ds.variables
+    assert 'theta' in processor.ds.variables
+    assert 'vega' in processor.ds.variables
+    assert 'rho' in processor.ds.variables
+
+def test_options_data_manager_error_handling(mock_yahoo_api):
+    mock_api = mock_yahoo_api.return_value
+    mock_api.get_options_data.side_effect = Exception("API Error")
+    manager = OptionsDataManager()
+    with pytest.raises(ValueError):
+        manager.get_options_data('INVALID')
+
+# Expand with more tests
+def test_filter_by_dte(sample_options_data):
+    manager = OptionsDataManager()
+    df = pd.DataFrame({'dte': [5, 15, 25]})
+    filtered = manager.filter_by_dte(df, min_dte=10, max_dte=20)
+    assert len(filtered) == 1
+    assert filtered['dte'].iloc[0] == 15
+
+def test_get_expiration_dates(sample_options_data):
+    processor = OptionsDataProcessor(sample_options_data, 100.0)
+    dates = processor.get_expiration_dates()
+    assert dates == ['2023-12-15']
+
+# Add tests for interpolation, greeks calculation, error handling in processor, etc. 

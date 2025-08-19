@@ -8,12 +8,30 @@ from typing import Callable, Dict, Any, Optional, Tuple, List
 import pandas as pd
 import numpy as np
 import requests
+import random
 
 # Set up logger - Use existing logger without adding a duplicate handler
 logger = logging.getLogger(__name__)
 
+def retry_on_rate_limit(max_retries=10, base_delay=30):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if 'Too Many Requests' in str(e) or '429' in str(e):
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(f"Rate limit hit, retrying after {delay:.1f} seconds (attempt {attempt+1}/{max_retries})")
+                        time.sleep(delay)
+                    else:
+                        raise
+            raise ValueError(f"Failed after {max_retries} retries")
+        return wrapper
+    return decorator
+
 class YahooFinanceAPI:
-    def __init__(self, cache_duration=600, max_workers=4):
+    def __init__(self, cache_duration=600, max_workers=1):
         """Initialize the Yahoo Finance API wrapper.
         
         Args:
@@ -50,6 +68,7 @@ class YahooFinanceAPI:
             # Default to a reasonable value if we can't get the actual rate
             return 0.04  # 4% as fallback
 
+    @retry_on_rate_limit()
     def _get_current_price(self, stock, ticker):
         """Helper method to get current price with fallbacks."""
         try:
@@ -86,6 +105,7 @@ class YahooFinanceAPI:
                 logger.error(f"Error getting price from history for {ticker}: {str(hist_error)}")
                 raise ValueError(f"Failed to get price for {ticker}")
 
+    @retry_on_rate_limit()
     def _process_expiry_date(self, stock, ticker, expiry, processed_dates, total_dates):
         """Process a single expiration date."""
         try:
@@ -196,40 +216,19 @@ class YahooFinanceAPI:
                 # Total number of dates to process
                 total_dates = len(expiry_dates)
                 
-                # Process expiration dates in parallel for better performance
-                # Use a higher number of workers for better throughput
-                max_workers = min(self.max_workers * 2, total_dates)
-                
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    # Submit all tasks
-                    future_to_expiry = {
-                        executor.submit(
-                            self._process_expiry_date, 
-                            stock, 
-                            ticker, 
-                            expiry, 
-                            i+1, 
-                            total_dates
-                        ): expiry for i, expiry in enumerate(expiry_dates)
-                    }
+                # Process expiration dates sequentially with delays
+                processed_count = 0
+                for i, expiry in enumerate(expiry_dates):
+                    result = self._process_expiry_date(stock, ticker, expiry, i+1, total_dates)
                     
-                    # Process results as they complete
-                    for future in concurrent.futures.as_completed(future_to_expiry):
-                        expiry = future_to_expiry[future]
-                        try:
-                            result = future.result()
-                            
-                            # Add to options data
-                            if result and 'data' in result:
-                                options_data[expiry] = result['data']
-                                
-                                # Call progress callback if provided
-                                if progress_callback:
-                                    processed_dates = result['processed']
-                                    progress_callback(options_data, current_price, processed_dates, total_dates)
-                            
-                        except Exception as e:
-                            logger.error(f"Error processing future for {expiry}: {str(e)}")
+                    if result and 'data' in result:
+                        options_data[expiry] = result['data']
+                        
+                        processed_count += 1
+                        if progress_callback:
+                            progress_callback(options_data, current_price, processed_count, total_dates)
+                    
+                    time.sleep(0.5)  # Delay between requests to avoid rate limiting
                 
                 # Verify we have some data before returning
                 if not options_data:

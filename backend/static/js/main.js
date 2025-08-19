@@ -383,14 +383,23 @@ function updatePlot() {
             }
         };
         
+        // Calculate min and max y from all valid values
+        let allValues = [...callValues, ...putValues].filter(v => v !== null && !isNaN(v) && v !== undefined);
+        let minY = allValues.length > 0 ? Math.min(...allValues) : 0;
+        let maxY = allValues.length > 0 ? Math.max(...allValues) : 1;
+
+        // Add padding for the line
+        const yPadding = (maxY - minY) * 0.1 || 0.1;
+        minY -= yPadding;
+        maxY += yPadding;
+
         // Add current price line
         const currentPriceLine = {
             x: [state.currentPrice, state.currentPrice],
-            y: [0, Math.max(...callValues.filter(v => v !== null && !isNaN(v) && v !== undefined), 
-                             ...putValues.filter(v => v !== null && !isNaN(v) && v !== undefined)) * 1.1 || 1],
+            y: [minY, maxY],
             type: 'scatter',
             mode: 'lines',
-            name: `Spot: $${state.currentPrice.toFixed(2)}`, // Changed from "Current Price"
+            name: `Spot: $${state.currentPrice.toFixed(2)}`,
             line: {
                 color: 'green',
                 width: 2,
@@ -401,7 +410,7 @@ function updatePlot() {
         // Add hover line (initially hidden)
         const hoverLine = {
             x: [0, 0],
-            y: [0, 0],
+            y: [minY, maxY],
             type: 'scatter',
             mode: 'lines',
             name: 'Strike',
@@ -438,7 +447,8 @@ function updatePlot() {
                 b: 50,
                 t: 50,
                 pad: 4
-            }
+            },
+            template: 'plotly_dark'
         };
         
         // Create or update the plot
@@ -664,10 +674,9 @@ function updateHoverLine(strike) {
         plotData[3].x = [strike, strike];
         plotData[3].visible = true;
         
-        // Get y-axis range
+        // Get y-axis range with padding
         let yValues = [];
         if (selectedPlotType === 'IV') {
-            // For IV, we need to multiply by 100 to match the display
             yValues = [...calls.map(item => item[plotField] * 100), ...puts.map(item => item[plotField] * 100)]
                 .filter(y => y != null && !isNaN(y));
         } else {
@@ -675,8 +684,13 @@ function updateHoverLine(strike) {
                 .filter(y => y != null && !isNaN(y));
         }
         
-        const yMax = Math.max(...yValues) * 1.1 || 1;
-        plotData[3].y = [0, yMax];
+        let minY = yValues.length > 0 ? Math.min(...yValues) : 0;
+        let maxY = yValues.length > 0 ? Math.max(...yValues) : 1;
+        const yPadding = (maxY - minY) * 0.1 || 0.1;
+        minY -= yPadding;
+        maxY += yPadding;
+        
+        plotData[3].y = [minY, maxY];
         
         // Track if we're currently hovering
         state.isHovering = strike !== findAtmStrike(calls, puts, state.currentPrice);

@@ -60,11 +60,11 @@ def test_load_homepage(driver):
     assert "Options Visualizer" in driver.title
     
     # Check that the search form is present
-    search_input = driver.find_element(By.ID, "ticker-input")
+    search_input = driver.find_element(By.ID, "ticker")
     assert search_input is not None
     
     # Check that the search button is present
-    search_button = driver.find_element(By.ID, "search-button")
+    search_button = driver.find_element(By.ID, "search-btn")
     assert search_button is not None
 
 
@@ -75,12 +75,12 @@ def test_search_for_ticker(driver):
     driver.get("http://localhost:5001")
     
     # Enter a ticker symbol
-    search_input = driver.find_element(By.ID, "ticker-input")
+    search_input = driver.find_element(By.ID, "ticker")
     search_input.clear()
     search_input.send_keys("SPY")
     
     # Click the search button
-    search_button = driver.find_element(By.ID, "search-button")
+    search_button = driver.find_element(By.ID, "search-btn")
     search_button.click()
     
     # Wait for the options data to load
@@ -104,10 +104,10 @@ def test_toggle_metrics(driver):
     """Test toggling between different metrics."""
     # Navigate to the homepage and search for a ticker
     driver.get("http://localhost:5001")
-    search_input = driver.find_element(By.ID, "ticker-input")
+    search_input = driver.find_element(By.ID, "ticker")
     search_input.clear()
     search_input.send_keys("SPY")
-    search_button = driver.find_element(By.ID, "search-button")
+    search_button = driver.find_element(By.ID, "search-btn")
     search_button.click()
     
     # Wait for the options data to load
@@ -119,14 +119,14 @@ def test_toggle_metrics(driver):
         pytest.skip("Options data did not load in time")
     
     # Find the metric radio buttons
-    metric_radios = driver.find_elements(By.NAME, "metric")
+    metric_radios = driver.find_elements(By.NAME, "plot-type")
     
     # Check that we have multiple metric options
     assert len(metric_radios) > 1
     
     # Toggle to a different metric (e.g., Delta)
     for radio in metric_radios:
-        if radio.get_attribute("value") == "delta":
+        if radio.get_attribute("value") == "Delta":
             radio.click()
             break
     
@@ -146,10 +146,10 @@ def test_expiry_navigation(driver):
     """Test navigating between different expiration dates."""
     # Navigate to the homepage and search for a ticker
     driver.get("http://localhost:5001")
-    search_input = driver.find_element(By.ID, "ticker-input")
+    search_input = driver.find_element(By.ID, "ticker")
     search_input.clear()
     search_input.send_keys("SPY")
-    search_button = driver.find_element(By.ID, "search-button")
+    search_button = driver.find_element(By.ID, "search-btn")
     search_button.click()
     
     # Wait for the options data to load
@@ -161,13 +161,13 @@ def test_expiry_navigation(driver):
         pytest.skip("Options data did not load in time")
     
     # Find the expiry navigation buttons
-    next_expiry_button = driver.find_element(By.ID, "next-expiry")
+    next_expiry_button = driver.find_element(By.ID, "next-btn")
     
     # Check that the button exists
     assert next_expiry_button is not None
     
     # Get the current expiry date
-    current_expiry = driver.find_element(By.ID, "current-expiry").text
+    current_expiry = driver.find_element(By.ID, "expiry-label").text
     
     # Click the next expiry button
     next_expiry_button.click()
@@ -176,7 +176,7 @@ def test_expiry_navigation(driver):
     time.sleep(2)
     
     # Get the new expiry date
-    new_expiry = driver.find_element(By.ID, "current-expiry").text
+    new_expiry = driver.find_element(By.ID, "expiry-label").text
     
     # Check that the expiry date has changed
     assert new_expiry != current_expiry 

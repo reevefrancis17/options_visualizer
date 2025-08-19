@@ -5,7 +5,7 @@ import pytest
 import numpy as np
 from backend.models.black_scholes import (
     call_price, put_price, delta, gamma, theta, vega, rho, 
-    implied_volatility, calculate_all_greeks
+    implied_volatility, calculate_all_greeks, calculate_iv_surface
 )
 
 
@@ -139,3 +139,56 @@ def test_calculate_all_greeks():
     assert greeks["theta"] < 0  # Theta is negative
     assert greeks["vega"] > 0   # Vega is positive
     assert greeks["rho"] > 0    # Call rho is positive 
+
+@pytest.mark.parametrize("S, K, T, r, sigma, expected", [
+    (100, 100, 1, 0.05, 0, 0),  # sigma=0
+    (100, 90, 0, 0.05, 0.2, 10),  # T=0
+    (100, 0, 1, 0.05, 0.2, 100),  # K=0
+    (0, 100, 1, 0.05, 0.2, 0),  # S=0
+])
+def test_call_price_edge_cases(S, K, T, r, sigma, expected):
+    assert call_price(S, K, T, r, sigma) == expected
+
+@pytest.mark.parametrize("S, K, T, r, sigma, expected", [
+    (100, 100, 1, 0.05, 0, 0),  # sigma=0
+    (90, 100, 0, 0.05, 0.2, 10),  # T=0
+    (100, 0, 1, 0.05, 0.2, 0),  # K=0
+    (0, 100, 1, 0.05, 0.2, np.exp(-0.05 * 1) * 100),  # S=0
+])
+def test_put_price_edge_cases(S, K, T, r, sigma, expected):
+    assert put_price(S, K, T, r, sigma) == expected
+
+@pytest.mark.parametrize("S, K, T, r, sigma, option_type, expected", [
+    (100, 100, 0, 0.05, 0.2, 'call', 0.0),
+    (110, 100, 0, 0.05, 0.2, 'call', 1.0),
+    (90, 100, 0, 0.05, 0.2, 'call', 0.0),
+    (100, 100, 0, 0.05, 0.2, 'put', 0.0),
+    (90, 100, 0, 0.05, 0.2, 'put', -1.0),
+    (110, 100, 0, 0.05, 0.2, 'put', 0.0),
+])
+def test_greeks_edge_cases(S, K, T, r, sigma, option_type, expected):
+    assert abs(delta(S, K, T, r, sigma, option_type) - expected) < 0.1  # Loose assertion
+
+# Similar for other greeks
+
+def test_implied_volatility_edge_cases():
+    iv = implied_volatility( -1, 100, 100, 1, 0.05, 'call')  # Negative price
+    assert np.isnan(iv)
+
+    iv = implied_volatility(1e-7, 100, 100, 1, 0.05, 'call')
+    assert iv == 0.01
+
+    # Test market_price &lt; intrinsic for ITM
+    iv = implied_volatility(9.9, 110, 100, 1, 0.05, 'call')
+    assert np.isnan(iv)
+
+def test_calculate_iv_surface():
+    market_prices = np.array([[5.0, 6.0], [3.0, 4.0]])
+    strikes = [95, 105]
+    expiries = [0.5, 1.0]
+    S = 100
+    r = 0.05
+    option_type = 'call'
+    iv_surface = calculate_iv_surface(market_prices, strikes, expiries, S, r, option_type)
+    assert iv_surface.shape == market_prices.shape
+    assert np.all(iv_surface > 0) 

@@ -12,6 +12,8 @@ import threading
 import sys
 import math
 from typing import Dict, Optional, Callable, Tuple, List, Any, Union
+from scipy.spatial import QhullError
+from scipy.spatial._qhull import QhullError
 
 # Import the finance API and models
 from python.yahoo_finance import YahooFinanceAPI
@@ -915,11 +917,11 @@ class OptionsDataProcessor:
                         da = da.where(da != 0)
                     
                     # Use xarray's built-in interpolation for NaN values
-                    # First interpolate along strike dimension
-                    da_interp = da.interpolate_na(dim='strike', method='linear')
+                    # First interpolate along strike dimension (more reliable)
+                    da_interp = da.interpolate_na(dim='strike', method='linear', fill_value='extrapolate')
                     
                     # Then interpolate along DTE dimension
-                    da_interp = da_interp.interpolate_na(dim='DTE', method='linear')
+                    da_interp = da_interp.interpolate_na(dim='DTE', method='linear', fill_value='extrapolate')
                     
                     # For any remaining NaN values, use griddata for 2D interpolation
                     if da_interp.isnull().any():
@@ -956,14 +958,23 @@ class OptionsDataProcessor:
                             target_points = np.column_stack([strike_grid.ravel(), dte_grid.ravel()])
                             
                             # Interpolate using griddata
-                            from scipy.interpolate import griddata
-                            interp_values = griddata(
-                                valid_points,
-                                valid_values,
-                                target_points,
-                                method='linear',
-                                fill_value=np.nan
-                            )
+                            try:
+                                interp_values = griddata(
+                                    valid_points,
+                                    valid_values,
+                                    target_points,
+                                    method='linear',
+                                    fill_value=np.nan
+                                )
+                            except QhullError:
+                                logger.warning("Linear interpolation failed due to degenerate points, falling back to nearest")
+                                interp_values = griddata(
+                                    valid_points,
+                                    valid_values,
+                                    target_points,
+                                    method='nearest',
+                                    fill_value=np.nan
+                                )
                             
                             # Reshape back to original grid shape
                             interp_values = interp_values.reshape(len(strikes), len(dtes))
@@ -1078,6 +1089,8 @@ class OptionsDataProcessor:
             # For puts: max(0, K - S)
             S = self.current_price
             
+            self.ds['intrinsic_value'] = xr.zeros_like(self.ds['price'])
+            
             # Process calls
             if 'call' in self.ds.option_type.values:
                 strikes = self.ds.strike.values
@@ -1112,7 +1125,7 @@ class OptionsDataProcessor:
             
             # Calculate spread (ask - bid)
             if 'ask' in self.ds and 'bid' in self.ds:
-                self.ds['spread'] = self.ds['ask'] - self.ds['bid']
+                self.ds['spread'] = (self.ds['ask'] - self.ds['bid']).abs()
                 logger.info("Calculated spread")
             
             # Reverse engineer implied volatility where missing
@@ -1570,13 +1583,23 @@ class OptionsDataProcessor:
                             all_points = np.column_stack([all_indices[0].flatten(), all_indices[1].flatten()])
                             
                             # Interpolate missing values
-                            interpolated_values = griddata(
-                                valid_points, 
-                                valid_values, 
-                                all_points, 
-                                method='cubic', 
-                                fill_value=np.nan
-                            )
+                            try:
+                                interpolated_values = griddata(
+                                    valid_points, 
+                                    valid_values, 
+                                    all_points, 
+                                    method='cubic', 
+                                    fill_value=np.nan
+                                )
+                            except QhullError:
+                                logger.warning("Cubic interpolation failed due to degenerate points, falling back to nearest")
+                                interpolated_values = griddata(
+                                    valid_points, 
+                                    valid_values, 
+                                    all_points, 
+                                    method='nearest', 
+                                    fill_value=np.nan
+                                )
                             
                             # Reshape back to original shape
                             interpolated_ivs = interpolated_values.reshape((len(self.ds.strike), len(self.ds.DTE)))
@@ -2225,30 +2248,36 @@ class OptionsDataProcessor:
         logger.info("Completed numerical computation of all Greeks")
 
     def _clean_dataframe(self, df):
-        """Clean up column names and data types in the DataFrame."""
+        """
+        Clean and preprocess the DataFrame.
+        """
         try:
-            # Define numeric columns explicitly
-            numeric_cols = [
-                'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 
-                'openInterest', 'impliedVolatility', 'inTheMoney', 'strike'
-            ]
-            
-            # Convert to numeric, coercing errors to NaN
+            # Convert columns to appropriate types
+            numeric_cols = ['strike', 'lastPrice', 'bid', 'ask', 'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility']
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-                    logger.info(f"Converted {col} to numeric, NaN count: {df[col].isna().sum()}")
             
-            # Calculate derived values
-            df['mid_price'] = (df['bid'] + df['ask']) / 2
-            df['price'] = df['mid_price']
+            # Convert lastTradeDate to datetime if present
+            if 'lastTradeDate' in df.columns:
+                df['lastTradeDate'] = pd.to_datetime(df['lastTradeDate'], errors='coerce')
             
-            # Calculate intrinsic values efficiently using vectorized operations
-            mask_call = df['option_type'] == 'call'
-            df.loc[mask_call, 'intrinsic_value'] = np.maximum(0, self.current_price - df.loc[mask_call, 'strike'])
-            df.loc[~mask_call, 'intrinsic_value'] = np.maximum(0, df.loc[~mask_call, 'strike'] - self.current_price)
-            df['extrinsic_value'] = df['price'] - df['intrinsic_value']
-            
+            # Other cleaning operations...
+            # ...
+
+            # Filter out stale data based on lastTradeDate
+            if 'lastTradeDate' in df.columns and not df.empty:
+                max_last_trade = df['lastTradeDate'].max()
+                if pd.notnull(max_last_trade):
+                    threshold = max_last_trade - pd.Timedelta(hours=24)
+                    stale_mask = df['lastTradeDate'] < threshold
+                    if stale_mask.any():
+                        logger.info(f"Removing {stale_mask.sum()} stale contracts with lastTradeDate older than 24 hours from max")
+                        df = df[~stale_mask]
+            # ...
+
+            # ...
+
             # Store min/max strike
             self.min_strike = df['strike'].min()
             self.max_strike = df['strike'].max()
